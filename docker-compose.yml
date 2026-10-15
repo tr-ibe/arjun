@@ -1,0 +1,18 @@
+services:
+  arjun:
+    build: .
+    # Coolify's proxy routes the domain to this port. For a local run, see docker-compose.local.yml.
+    expose:
+      - "3000"
+    environment:
+      AUTH_USERNAME: ${AUTH_USERNAME:?Set AUTH_USERNAME}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:?Set AUTH_PASSWORD}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET to a long random string}
+    volumes:
+      - arjun-home:/home/node
+    restart: unless-stopped
+    # Give running Claude processes a moment to stop when the container is replaced.
+    stop_grace_period: 20s
+
+volumes:
+  arjun-home:

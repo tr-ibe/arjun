@@ -1,0 +1,4 @@
+#!/bin/sh
+# Claude runs this from its shell. The server puts this folder on Claude's PATH.
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec node "$DIR/dist/cli/update_run.js" "$@"

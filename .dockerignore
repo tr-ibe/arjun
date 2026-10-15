@@ -1,0 +1,10 @@
+.git
+node_modules
+web/node_modules
+dist
+web/dist
+.env
+.env.*
+test/.tmp
+*.log
+.demo

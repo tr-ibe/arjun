@@ -1,0 +1,9 @@
+node_modules
+dist
+web/dist
+.env
+.env.*
+!.env.example
+test/.tmp
+*.log
+.demo

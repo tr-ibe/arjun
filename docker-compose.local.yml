@@ -1,0 +1,6 @@
+# Local only: publish the port on your machine.
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+services:
+  arjun:
+    ports:
+      - "${HOST_PORT:-3000}:3000"
