@@ -4,10 +4,11 @@ services:
     # Coolify's proxy routes the domain to this port. For a local run, see docker-compose.local.yml.
     expose:
       - "3000"
+    # The server refuses to start if any of these is missing.
     environment:
-      AUTH_USERNAME: ${AUTH_USERNAME:?Set AUTH_USERNAME}
-      AUTH_PASSWORD: ${AUTH_PASSWORD:?Set AUTH_PASSWORD}
-      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET to a long random string}
+      - AUTH_USERNAME=${AUTH_USERNAME}
+      - AUTH_PASSWORD=${AUTH_PASSWORD}
+      - SESSION_SECRET=${SESSION_SECRET}
     volumes:
       - arjun-home:/home/node
     restart: unless-stopped
