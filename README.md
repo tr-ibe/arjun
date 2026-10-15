@@ -2,8 +2,6 @@
 
 Runs Claude Code tasks unattended. People create tasks in the web UI, other services create them through the API, and a Docker container runs each one with `claude -p` on a Max plan. Claude reports how it went with the `update_run` command, and any task can be continued with new instructions.
 
-The full design is in the [build plan](https://claude.ai/artifact/9YzwHpqQaB4r1MpxzYEWnm).
-
 ## How it works
 
 - **One container.** A Fastify server serves the React UI and the API, and a dispatcher starts queued runs, up to the limit set on the Settings page (default 5), priority 1 first.
