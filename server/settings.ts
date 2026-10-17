@@ -1,6 +1,6 @@
 import { db, now } from "./db.js";
 
-export const MODELS = ["fable", "opus", "sonnet"] as const;
+export const MODELS = ["fable", "opus", "sonnet", "haiku"] as const;
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 export interface Settings {
