@@ -21,7 +21,7 @@ export interface TaskRow {
   priority: number;
   model: string;
   effort: string;
-  source: "ui" | "api";
+  source: "ui" | "api" | "slack";
   api_key_id: number | null;
   created_at: string;
 }
@@ -113,6 +113,24 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 
+  -- A Slack thread and the task that holds its conversation, one to one.
+  CREATE TABLE IF NOT EXISTS slack_threads (
+    task_id   INTEGER PRIMARY KEY REFERENCES tasks(id),
+    channel   TEXT NOT NULL,
+    thread_ts TEXT NOT NULL,
+    permalink TEXT,
+    UNIQUE (channel, thread_ts)
+  );
+
+  -- Every Slack message handed to a run, so one Slack delivers twice is handled once.
+  CREATE TABLE IF NOT EXISTS slack_messages (
+    channel    TEXT NOT NULL,
+    ts         TEXT NOT NULL,
+    run_id     INTEGER NOT NULL REFERENCES runs(id),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (channel, ts)
+  );
+
   CREATE INDEX IF NOT EXISTS runs_task ON runs(task_id);
   CREATE INDEX IF NOT EXISTS runs_status ON runs(status);
   CREATE INDEX IF NOT EXISTS tasks_type ON tasks(type);
@@ -143,6 +161,40 @@ export function updateRun(id: number, fields: Partial<RunRow>): void {
   if (keys.length === 0) return;
   const sets = keys.map((k) => `${k} = @${k}`).join(", ");
   db.prepare(`UPDATE runs SET ${sets} WHERE id = @id`).run({ ...fields, id });
+}
+
+export function insertTask(fields: {
+  title: string;
+  prompt: string;
+  type: string | null;
+  priority: number;
+  model: string;
+  effort: string;
+  source: TaskRow["source"];
+  api_key_id: number | null;
+  timeout_min: number;
+}): number {
+  return db.transaction(() => {
+    const info = db
+      .prepare(
+        `INSERT INTO tasks (title, prompt, type, priority, model, effort, source, api_key_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        fields.title,
+        fields.prompt,
+        fields.type,
+        fields.priority,
+        fields.model,
+        fields.effort,
+        fields.source,
+        fields.api_key_id,
+        now(),
+      );
+    const id = Number(info.lastInsertRowid);
+    insertRun({ task_id: id, instructions: fields.prompt, timeout_min: fields.timeout_min });
+    return id;
+  })();
 }
 
 export function insertRun(fields: {

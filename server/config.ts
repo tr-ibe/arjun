@@ -23,6 +23,7 @@ export const config = {
   claudeBin: process.env.CLAUDE_BIN ?? "claude",
 
   binDir: join(appRoot, "bin"),
+  slackGuard: join(appRoot, "dist", "cli", "slack_guard.js"),
   webDir: join(appRoot, "web", "dist"),
 
   // Only tests change this, so timeouts can be measured in milliseconds.

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { db, getRun, getTask, insertRun, latestRun, now, runsForTask, updateRun, type RunRow, type TaskRow } from "../db.js";
+import { db, getRun, getTask, insertRun, insertTask, latestRun, now, runsForTask, updateRun, type RunRow, type TaskRow } from "../db.js";
 import { kick, pausedUntil, queuePositions } from "../dispatcher.js";
 import { activeCount, isActive, stopRun } from "../runner.js";
 import { checkEffort, checkInt, checkModel, getSettings, ValidationError } from "../settings.js";
@@ -24,6 +24,7 @@ function idParam(value: unknown): number {
 
 function sourceLabel(task: TaskRow): string {
   if (task.source === "ui") return "UI";
+  if (task.source === "slack") return "Slack";
   const key = db.prepare("SELECT name FROM api_keys WHERE id = ?").get(task.api_key_id) as { name: string } | undefined;
   return key?.name ?? "API";
 }
@@ -37,7 +38,16 @@ function taskView(taskId: number) {
   const task = getTask(taskId)!;
   const positions = queuePositions();
   const runs = runsForTask(taskId).map((r) => runView(r, positions));
-  return { ...task, source_label: sourceLabel(task), latest_run: runs[runs.length - 1], runs };
+  const slack = db.prepare("SELECT permalink FROM slack_threads WHERE task_id = ?").get(taskId) as
+    | { permalink: string | null }
+    | undefined;
+  return {
+    ...task,
+    source_label: sourceLabel(task),
+    slack_url: slack?.permalink ?? null,
+    latest_run: runs[runs.length - 1],
+    runs,
+  };
 }
 
 export async function taskRoutes(app: FastifyInstance) {
@@ -54,27 +64,17 @@ export async function taskRoutes(app: FastifyInstance) {
       body.timeout_min == null ? s.default_timeout_min : checkInt("timeout_min", body.timeout_min, 1, 24 * 60);
 
     const caller = req.caller!;
-    const taskId = db.transaction(() => {
-      const info = db
-        .prepare(
-          `INSERT INTO tasks (title, prompt, type, priority, model, effort, source, api_key_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          title,
-          prompt,
-          type,
-          priority,
-          model,
-          effort,
-          caller.kind,
-          caller.kind === "api" ? caller.keyId : null,
-          now(),
-        );
-      const id = Number(info.lastInsertRowid);
-      insertRun({ task_id: id, instructions: prompt, timeout_min: timeout });
-      return id;
-    })();
+    const taskId = insertTask({
+      title,
+      prompt,
+      type,
+      priority,
+      model,
+      effort,
+      source: caller.kind,
+      api_key_id: caller.kind === "api" ? caller.keyId : null,
+      timeout_min: timeout,
+    });
 
     kick();
     return reply.code(201).send(taskView(taskId));
@@ -94,8 +94,9 @@ export async function taskRoutes(app: FastifyInstance) {
       where.push("t.type = @type");
       params.type = q.type;
     }
-    if (q.source === "ui") {
-      where.push("t.source = 'ui'");
+    if (q.source === "ui" || q.source === "slack") {
+      where.push("t.source = @source");
+      params.source = q.source;
     } else if (q.source) {
       where.push("t.api_key_id = @key");
       params.key = Number(q.source);
@@ -128,7 +129,8 @@ export async function taskRoutes(app: FastifyInstance) {
       model: row.model,
       effort: row.effort,
       created_at: row.created_at,
-      source_label: row.source === "ui" ? "UI" : ((row.key_name as string | null) ?? "API"),
+      source_label:
+        row.source === "ui" ? "UI" : row.source === "slack" ? "Slack" : ((row.key_name as string | null) ?? "API"),
       latest_run: {
         id: row.run_id,
         attempt: row.attempt,

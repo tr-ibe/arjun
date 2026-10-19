@@ -10,7 +10,7 @@ import { continuePrompt, firstPrompt, USAGE_LIMIT_MESSAGE } from "./prompt.js";
 const TAIL_CHARS = 16_000;
 const KILL_GRACE_MS = 5_000;
 // Environment variables Claude must never see.
-const SECRET_ENV = ["AUTH_USERNAME", "AUTH_PASSWORD", "SESSION_SECRET"];
+const SECRET_ENV = ["AUTH_USERNAME", "AUTH_PASSWORD", "SESSION_SECRET", "SLACK_USER_TOKEN", "SLACK_APP_TOKEN"];
 
 class Tail {
   private buf = "";
@@ -60,15 +60,17 @@ export function startRun(run: RunRow): void {
   if (source) {
     sessionId = source.session.session_id!;
     runDir = source.session.run_dir!;
-    args.push("-p", continuePrompt(source.previous, run.instructions), "--resume", sessionId);
+    args.push("-p", continuePrompt(task, source.previous, run.instructions), "--resume", sessionId);
   } else {
     sessionId = randomUUID();
     runDir = join(config.runsDir, String(run.id));
     // A continue whose earlier attempts never started runs as a first attempt with both instructions.
     const instructions = run.resumed_from_run_id ? `${task.prompt}\n\n${run.instructions}` : run.instructions;
-    args.push("-p", firstPrompt(instructions), "--session-id", sessionId);
+    args.push("-p", firstPrompt(task, instructions), "--session-id", sessionId);
   }
   args.push("--model", task.model, "--effort", task.effort, "--dangerously-skip-permissions");
+  // Work asked for on Slack is read-only apart from pull requests, and this hook enforces it.
+  if (task.source === "slack") args.push("--settings", slackGuardSettings());
 
   mkdirSync(runDir, { recursive: true });
 
@@ -125,6 +127,11 @@ export function startRun(run: RunRow): void {
   // So also finish shortly after the process itself exits.
   child.on("exit", (code) => setTimeout(() => finish(code), 1_000));
   child.on("close", (code) => finish(code));
+}
+
+function slackGuardSettings(): string {
+  const hook = { type: "command", command: `node "${config.slackGuard}"` };
+  return JSON.stringify({ hooks: { PreToolUse: [{ matcher: "*", hooks: [hook] }] } });
 }
 
 export function stopRun(runId: number, reason: "timeout" | "cancel"): boolean {

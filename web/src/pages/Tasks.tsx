@@ -75,6 +75,7 @@ export function Tasks() {
         <select id="filter-source" value={source} onChange={(e) => setFilter("source", e.target.value)}>
           <option value="">All sources</option>
           <option value="ui">UI</option>
+          <option value="slack">Slack</option>
           {keys.map((k) => (
             <option key={k.id} value={k.id}>
               {k.name}

@@ -5,7 +5,7 @@
 //   FAKE_SLEEP=<seconds>                                  (default 0.2)
 // When a prompt has several, the last one wins, so a continue's new instructions take effect.
 import { spawnSync } from "node:child_process";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -31,7 +31,8 @@ for (const required of ["--model", "--effort", "--dangerously-skip-permissions"]
   if (!args.includes(required)) fail(`fake-claude: missing ${required}`, 5);
 }
 if (!process.env.RUN_ID) fail("fake-claude: RUN_ID not set", 3);
-if (process.env.AUTH_PASSWORD || process.env.SESSION_SECRET) fail("fake-claude: secrets leaked into the environment", 4);
+writeFileSync("claude-args.json", JSON.stringify(args)); // so tests can see how Claude was started
+if (process.env.AUTH_PASSWORD || process.env.SESSION_SECRET || process.env.SLACK_USER_TOKEN) fail("fake-claude: secrets leaked into the environment", 4);
 
 const outcome = directive("FAKE_OUTCOME", "done");
 const sleepSec = Number(directive("FAKE_SLEEP", "0.2"));
