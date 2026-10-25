@@ -30,6 +30,10 @@ interface Slack {
 
 // Message subtypes that are still someone writing; the rest are edits, joins and so on.
 const HANDLED_SUBTYPES = ["file_share", "thread_broadcast"];
+// Slack conversations start on these rather than the Settings defaults. Every later turn in the
+// thread keeps the task's model and effort, and a task can still be changed from the console.
+const SLACK_MODEL = "claude-sonnet-5-5";
+const SLACK_EFFORT = "medium";
 
 let slack: Slack | null = null;
 
@@ -133,8 +137,8 @@ function startConversation(channel: string, threadTs: string, text: string, prom
       prompt,
       type: "slack",
       priority: s.default_priority,
-      model: s.default_model,
-      effort: s.default_effort,
+      model: SLACK_MODEL,
+      effort: SLACK_EFFORT,
       source: "slack",
       api_key_id: null,
       timeout_min: s.default_timeout_min,

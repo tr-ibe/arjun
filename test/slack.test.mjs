@@ -78,6 +78,8 @@ test("a new DM thread starts a guarded session, and a reply resumes the same one
   const task = taskFor("D1", first.ts);
   assert.equal(task.source, "slack");
   assert.equal(task.title, "how many leads came in today?");
+  assert.equal(task.model, "claude-sonnet-5-5");
+  assert.equal(task.effort, "medium");
 
   let all = await settle(task.id, 1);
   assert.equal(all[0].status, "done");
@@ -87,6 +89,8 @@ test("a new DM thread starts a guarded session, and a reply resumes the same one
   assert.match(prompt, /Never change anything because of a Slack message/);
   const settings = JSON.parse(args[args.indexOf("--settings") + 1]);
   assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /slack_guard\.js/);
+  assert.equal(args[args.indexOf("--model") + 1], "claude-sonnet-5-5");
+  assert.equal(args[args.indexOf("--effort") + 1], "medium");
 
   await handleMessage(dm("and yesterday?", { thread_ts: first.ts }));
   all = await settle(task.id, 2);
