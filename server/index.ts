@@ -4,6 +4,7 @@ import { buildApp } from "./app.js";
 import { config } from "./config.js";
 import { startDispatcher } from "./dispatcher.js";
 import { recoverInterruptedRuns } from "./runner.js";
+import { startSlack } from "./slack.js";
 
 // Run history lives in Claude's session files, which Claude Code deletes after 30 days by default.
 // Keep them for 60 unless someone already chose a value.
@@ -30,6 +31,11 @@ recoverInterruptedRuns();
 const app = await buildApp();
 await app.listen({ port: config.port, host: config.host });
 startDispatcher();
+try {
+  await startSlack(app.log);
+} catch (err) {
+  app.log.error(err, "Slack could not start; everything else keeps running");
+}
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {

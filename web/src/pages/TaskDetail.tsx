@@ -39,7 +39,16 @@ export function TaskDetail() {
       </div>
       <div className="meta-line">
         {t.type && <span className="tag">{t.type}</span>}
-        <span>From {t.source_label}</span>
+        <span>
+          From{" "}
+          {t.slack_url ? (
+            <a href={t.slack_url} target="_blank" rel="noreferrer">
+              a Slack thread
+            </a>
+          ) : (
+            t.source_label
+          )}
+        </span>
         <span>Priority {t.priority}</span>
         <span>
           {t.model} · {t.effort} effort

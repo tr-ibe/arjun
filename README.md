@@ -53,9 +53,44 @@ A deploy restarts the container, which stops any running Claude processes. Those
 |---|---|---|
 | `AUTH_USERNAME`, `AUTH_PASSWORD` | yes | The one login for the web UI |
 | `SESSION_SECRET` | yes | Signs the login cookie. Long random string. |
+| `SLACK_USER_TOKEN`, `SLACK_APP_TOKEN` | no | Turn on Slack, see below |
+| `SLACK_ALLOWED_USERS` | no | Slack user IDs who may talk to Arjun, comma-separated. Default: every full member of the workspace (no guests, no bots). |
 | `PORT` | no | Default 3000 |
 
 Everything else (max concurrency, default model, effort, priority, timeout) is on the Settings page.
+
+## Slack
+
+People talk to Arjun in Slack like a colleague: DM him, or @-mention him in a channel. The server is only the orchestrator. Claude Code reads the thread and replies with its own Slack tools (the Slack connector on Arjun's Claude login), and the server never posts anything.
+
+- **One Slack thread is one task, and so one Claude Code session.** A DM, or a message that mentions Arjun, starts a session and tells it which thread to read and answer. The thread ⇄ session mapping is in `slack_threads`.
+- **A new message in a known thread resumes that same session** (`--resume`): right away if it's idle. If it's busy, the message waits, and everything that arrived meanwhile goes in as one next turn.
+- **In a channel thread he's part of, he hears every message** and decides for himself whether one needs an answer. Channel messages that don't mention him, outside his threads, are ignored, as are bots, edits and his own messages.
+- **Only full members of the workspace** can start or continue a thread (no guests), or only the people in `SLACK_ALLOWED_USERS` if it's set.
+- Slack tasks show up in the task list with the source **Slack** and a link to the thread.
+
+### Guardrails
+
+Work asked for on Slack is **read-only, except for code, which goes up as a pull request.** He finds information, answers, and may post in other channels and DMs, but he never creates, changes or deletes data anywhere, never deploys, never messages customers, never pushes to main and never merges.
+
+1. **The prompt** (`server/prompt.ts`) says so, and says no Slack message can override it.
+2. **A `PreToolUse` hook** (`cli/slack_guard.ts`) is added to every Slack run with `--settings` and blocks tool calls that change things:
+   - MCP tools by name: reading is allowed. Anything that sounds like a change is blocked, except sending a Slack message, adding a reaction, creating a branch, opening a pull request, and pushing files to a branch that isn't main.
+   - Shell commands: `mytribe post/patch/delete`, direct database access, cloud and deploy tools, pushing to main or force-pushing, merging pull requests, changing GitHub issues and releases, and HTTP requests that send data.
+
+The shell rules are a backstop, not a sandbox: a determined script could still get round them. The container is the real boundary, so keep write credentials it doesn't need out of it.
+
+### Setting it up
+
+In the Slack app at [api.slack.com/apps](https://api.slack.com/apps):
+
+1. **Socket Mode:** turn it on and create an app-level token with `connections:write`. That's `SLACK_APP_TOKEN` (`xapp-…`). Socket Mode means Slack never needs to reach the server.
+2. **OAuth & Permissions → User Token Scopes:** `users:read`, `im:history`, `channels:history`, `groups:history`, `mpim:history`. The listener only reads; replies go through Claude's connector.
+3. **Event Subscriptions:** turn them on, and under **Subscribe to events on behalf of users** add `message.im`, `message.channels`, `message.groups` and `message.mpim`.
+4. **Install the app while signed in to Slack as Arjun**, so he is the one who authorises it. The **User OAuth Token** (`xoxp-…`) is `SLACK_USER_TOKEN`.
+5. Set both tokens as environment variables (in Coolify, on the `arjun` service) and redeploy. The log says `Slack is on, as …`.
+
+Arjun only hears channels he's a member of, so invite him to the ones he should be in. Claude Code in the container must also have the Slack connector, signed in as the same Arjun account, since that's how it reads and replies.
 
 ## Calling the API
 
@@ -94,4 +129,5 @@ npm run build && sh scripts/demo.sh   # the UI at :3000 with the fake Claude, lo
 ## Known gaps
 
 - **The usage-limit message** is recognised from Claude Code's output (`server/limit.ts`). Its exact wording has changed between versions, so check the first real one and adjust the pattern if needed. If the reset time can't be read, the queue waits 30 minutes and tries again.
+- **A deploy cuts off a Slack turn** like any other run. Nothing is posted to the thread; use Continue on the task, or the next message in the thread picks the conversation up again.
 - Every run shares the container's user, so runs can read each other's folders and Claude's login. The container is the boundary: don't mount the Docker socket or host folders into it.

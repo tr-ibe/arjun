@@ -28,8 +28,9 @@ export interface Task {
   priority: number;
   model: string;
   effort: string;
-  source: "ui" | "api";
+  source: "ui" | "api" | "slack";
   source_label: string;
+  slack_url: string | null;
   created_at: string;
   latest_run: Run;
   runs: Run[];

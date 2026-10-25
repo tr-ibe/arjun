@@ -9,6 +9,10 @@ services:
       - AUTH_USERNAME=${AUTH_USERNAME}
       - AUTH_PASSWORD=${AUTH_PASSWORD}
       - SESSION_SECRET=${SESSION_SECRET}
+      # Optional: Slack is off unless both tokens are set.
+      - SLACK_USER_TOKEN=${SLACK_USER_TOKEN}
+      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
+      - SLACK_ALLOWED_USERS=${SLACK_ALLOWED_USERS}
     volumes:
       - arjun-home:/home/node
     restart: unless-stopped
