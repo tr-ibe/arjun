@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { authHook } from "./auth.js";
 import { config } from "./config.js";
-import { authRoutes, keyRoutes, metaRoutes, settingsRoutes } from "./routes/admin.js";
+import { accountRoutes, authRoutes, keyRoutes, metaRoutes, settingsRoutes } from "./routes/admin.js";
 import { internalRoutes } from "./routes/internal.js";
 import { taskRoutes } from "./routes/tasks.js";
 import { ValidationError } from "./settings.js";
@@ -38,6 +38,7 @@ export async function buildApp() {
   await app.register(taskRoutes);
   await app.register(keyRoutes);
   await app.register(settingsRoutes);
+  await app.register(accountRoutes);
   await app.register(metaRoutes);
   await app.register(internalRoutes);
 

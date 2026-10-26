@@ -283,3 +283,13 @@ tr.revoked td { color: var(--muted); }
   .queue-meter { margin-left: 0; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* ---- Accounts ---- */
+.accounts { display: grid; gap: 12px; margin-bottom: 16px; }
+.accounts p { margin: 0; }
+.account-actions { display: inline-flex; gap: 6px; white-space: nowrap; }
+.usage { min-width: 120px; }
+.meter { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--accent); }
+.meter.high span { background: var(--warn); }
+.meter.full span { background: var(--bad); }

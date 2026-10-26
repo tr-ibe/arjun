@@ -104,6 +104,7 @@ function LatestCard({ run, onChanged }: { run: Run; onChanged: () => void }) {
           {run.queue_position ? <span className="muted"> · #{run.queue_position} in line</span> : null}
         </h2>
         <span className="muted mono">
+          {run.account_name && `${run.account_name} · `}
           {run.started_at ? duration(run.started_at, run.ended_at) : "not started"}
           {" · "}timeout {run.timeout_min} min
         </span>
@@ -118,8 +119,8 @@ function LatestCard({ run, onChanged }: { run: Run; onChanged: () => void }) {
       {run.status === "running" && <p className="muted">Claude is working on it. The timeline below updates every few seconds.</p>}
       {run.summary && <p className="summary">{run.summary}</p>}
       {run.error && run.error !== run.summary && <pre className="error-text">{run.error}</pre>}
-      {run.status === "limited" && run.resets_at && (
-        <p className="muted">A continue is queued and starts after {clock(run.resets_at)}.</p>
+      {run.status === "limited" && (
+        <p className="muted">A continue is queued and starts on the next Claude account that has room.</p>
       )}
       {canCancel && (
         <div className="actions">
@@ -210,6 +211,7 @@ function Attempt({ run }: { run: Run }) {
         <span className="mono">#{run.attempt}</span>
         <StatusPill status={run.status} />
         <span className="muted mono">{duration(run.started_at, run.ended_at)}</span>
+        {run.account_name && <span className="muted">{run.account_name}</span>}
       </div>
       {run.attempt > 1 && <Collapsible text={run.instructions} lines={3} />}
       {(run.summary || run.error) && <div className="sub">{run.summary ?? run.error}</div>}

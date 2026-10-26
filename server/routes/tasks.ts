@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { db, getRun, getTask, insertRun, insertTask, latestRun, now, runsForTask, updateRun, type RunRow, type TaskRow } from "../db.js";
-import { kick, pausedUntil, queuePositions } from "../dispatcher.js";
+import { kick, queuePaused, queuePositions } from "../dispatcher.js";
 import { activeCount, isActive, stopRun } from "../runner.js";
 import { checkEffort, checkInt, checkModel, getSettings, ValidationError } from "../settings.js";
 import { readTimeline } from "../timeline.js";
@@ -31,7 +31,10 @@ function sourceLabel(task: TaskRow): string {
 
 function runView(run: RunRow, positions: Map<number, number>) {
   const { pid: _pid, ...rest } = run;
-  return { ...rest, queue_position: positions.get(run.id) ?? null };
+  const account = run.account_id
+    ? (db.prepare("SELECT name FROM accounts WHERE id = ?").get(run.account_id) as { name: string } | undefined)
+    : undefined;
+  return { ...rest, account_name: account?.name ?? null, queue_position: positions.get(run.id) ?? null };
 }
 
 function taskView(taskId: number) {
@@ -206,11 +209,13 @@ export async function taskRoutes(app: FastifyInstance) {
 
   app.get("/api/status", async () => {
     const queued = (db.prepare("SELECT COUNT(*) AS n FROM runs WHERE status = 'queued'").get() as { n: number }).n;
+    const paused = queuePaused();
     return {
       running: activeCount(),
       queued,
       max_concurrency: getSettings().max_concurrency,
-      paused_until: pausedUntil(),
+      paused_until: paused?.until ?? null,
+      paused_reason: paused?.reason ?? null,
     };
   });
 }

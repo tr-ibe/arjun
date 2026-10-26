@@ -9,6 +9,9 @@ export interface Settings {
   default_effort: string;
   default_priority: number;
   default_timeout_min: number;
+  // Move on to the next Claude account once this one has used this much (percent).
+  switch_at_5h_pct: number;
+  switch_at_weekly_pct: number;
 }
 
 const DEFAULTS: Settings = {
@@ -17,6 +20,8 @@ const DEFAULTS: Settings = {
   default_effort: "high",
   default_priority: 5,
   default_timeout_min: 30,
+  switch_at_5h_pct: 85,
+  switch_at_weekly_pct: 95,
 };
 
 export class ValidationError extends Error {}
@@ -50,6 +55,8 @@ const validators: { [K in keyof Settings]: (v: unknown) => Settings[K] } = {
   default_effort: checkEffort,
   default_priority: (v) => checkInt("default_priority", v, 1, 10),
   default_timeout_min: (v) => checkInt("default_timeout_min", v, 1, 24 * 60),
+  switch_at_5h_pct: (v) => checkInt("switch_at_5h_pct", v, 1, 100),
+  switch_at_weekly_pct: (v) => checkInt("switch_at_weekly_pct", v, 1, 100),
 };
 
 export function getSettings(): Settings {

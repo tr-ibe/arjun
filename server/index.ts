@@ -1,36 +1,20 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync } from "node:fs";
+import { ensureCleanupPeriod } from "./account_dir.js";
+import { startAccountChecks } from "./accounts.js";
 import { buildApp } from "./app.js";
 import { config } from "./config.js";
-import { startDispatcher } from "./dispatcher.js";
+import { kick, startDispatcher } from "./dispatcher.js";
 import { recoverInterruptedRuns } from "./runner.js";
 import { startSlack } from "./slack.js";
 
-// Run history lives in Claude's session files, which Claude Code deletes after 30 days by default.
-// Keep them for 60 unless someone already chose a value.
-function ensureClaudeSettings() {
-  const file = join(config.claudeConfigDir, "settings.json");
-  let settings: Record<string, unknown> = {};
-  if (existsSync(file)) {
-    try {
-      settings = JSON.parse(readFileSync(file, "utf8"));
-    } catch {
-      return; // Don't overwrite a file we can't read.
-    }
-  }
-  if (settings.cleanupPeriodDays !== undefined) return;
-  settings.cleanupPeriodDays = 60;
-  mkdirSync(config.claudeConfigDir, { recursive: true });
-  writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`);
-}
-
 mkdirSync(config.runsDir, { recursive: true });
-ensureClaudeSettings();
+ensureCleanupPeriod(config.claudeConfigDir);
 recoverInterruptedRuns();
 
 const app = await buildApp();
 await app.listen({ port: config.port, host: config.host });
 startDispatcher();
+startAccountChecks(app.log, kick);
 try {
   await startSlack(app.log);
 } catch (err) {

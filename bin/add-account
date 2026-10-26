@@ -1,0 +1,4 @@
+#!/bin/sh
+# Adds a Claude account (or logs one in again). Run it in the container's terminal.
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec node "$DIR/dist/cli/add_account.js" "$@"

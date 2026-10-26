@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // Stands in for the real `claude` CLI in tests: takes the same flags, writes a session file where
 // Claude Code would, and calls update_run. Instructions in the prompt control what it does:
-//   FAKE_OUTCOME=done|stuck|error|noreport|crash|limit   (default done)
-//   FAKE_SLEEP=<seconds>                                  (default 0.2)
+//   FAKE_OUTCOME=done|stuck|error|noreport|crash|limit|login   (default done)
+//   FAKE_ONLY_IN=<account folder name>   only use FAKE_OUTCOME in that account's folder, else done
+//   FAKE_SLEEP=<seconds>                                        (default 0.2)
 // When a prompt has several, the last one wins, so a continue's new instructions take effect.
 import { spawnSync } from "node:child_process";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 const args = process.argv.slice(2);
 const flag = (name) => {
@@ -34,11 +35,19 @@ if (!process.env.RUN_ID) fail("fake-claude: RUN_ID not set", 3);
 writeFileSync("claude-args.json", JSON.stringify(args)); // so tests can see how Claude was started
 if (process.env.AUTH_PASSWORD || process.env.SESSION_SECRET || process.env.SLACK_USER_TOKEN) fail("fake-claude: secrets leaked into the environment", 4);
 
-const outcome = directive("FAKE_OUTCOME", "done");
+const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+const onlyIn = directive("FAKE_ONLY_IN", null);
+const outcome = onlyIn && onlyIn !== basename(configDir) ? "done" : directive("FAKE_OUTCOME", "done");
 const sleepSec = Number(directive("FAKE_SLEEP", "0.2"));
 
+// Like Claude Code, resuming only works if this account's folder can see the session.
+if (args.includes("--resume")) {
+  const projects = join(configDir, "projects");
+  const found = existsSync(projects) && readdirSync(projects).some((d) => existsSync(join(projects, d, `${sessionId}.jsonl`)));
+  if (!found) fail(`No conversation found with session ID: ${sessionId}`, 1);
+}
+
 // Write the session the way Claude Code does.
-const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 const projectDir = join(configDir, "projects", process.cwd().replace(/[^a-zA-Z0-9]/g, "-"));
 mkdirSync(projectDir, { recursive: true });
 const sessionFile = join(projectDir, `${sessionId}.jsonl`);
@@ -77,6 +86,9 @@ switch (outcome) {
     process.exit(1);
   case "limit":
     console.log("You've hit your limit · resets 3pm (UTC)");
+    process.exit(1);
+  case "login":
+    console.log("Invalid API key · Please run /login");
     process.exit(1);
   default:
     fail(`fake-claude: unknown FAKE_OUTCOME ${outcome}`, 7);

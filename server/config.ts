@@ -21,6 +21,9 @@ export const config = {
   runsDir: process.env.RUNS_DIR ?? join(homedir(), "runs"),
   claudeConfigDir: process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"),
   claudeBin: process.env.CLAUDE_BIN ?? "claude",
+  // Extra Claude accounts, one config folder each (the main account uses claudeConfigDir).
+  accountsDir: process.env.ACCOUNTS_DIR ?? join(homedir(), "accounts"),
+  usageUrl: process.env.CLAUDE_USAGE_URL ?? "https://api.anthropic.com/api/oauth/usage",
 
   binDir: join(appRoot, "bin"),
   slackGuard: join(appRoot, "dist", "cli", "slack_guard.js"),

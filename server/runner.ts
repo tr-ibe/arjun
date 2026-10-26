@@ -2,10 +2,13 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { delimiter, join } from "node:path";
+import { checkAccount, markLimited, markLoginFailed } from "./accounts.js";
 import { config } from "./config.js";
 import { db, getRun, getTask, insertRun, now, updateRun, type RunRow } from "./db.js";
 import { detectUsageLimit } from "./limit.js";
-import { continuePrompt, firstPrompt, USAGE_LIMIT_MESSAGE } from "./prompt.js";
+import { continuePrompt, firstPrompt, LOGIN_FAILED_MESSAGE, USAGE_LIMIT_MESSAGE } from "./prompt.js";
+import { detectLoginFailure } from "./routing.js";
+import { findSessionFile } from "./timeline.js";
 
 const TAIL_CHARS = 16_000;
 const KILL_GRACE_MS = 5_000;
@@ -50,20 +53,23 @@ function resumeSource(run: RunRow): { previous: RunRow; session: RunRow } | null
   return cur?.session_id && cur.run_dir ? { previous, session: cur } : null;
 }
 
-export function startRun(run: RunRow): void {
+export function startRun(run: RunRow, account: { id: number; config_dir: string }): void {
   const task = getTask(run.task_id)!;
   const source = resumeSource(run);
+  // An attempt that failed before Claude saved anything (a limit or a bad login on its first call)
+  // has no session to resume, so start a new one in the same folder.
+  const canResume = !!source && !!findSessionFile(source.session.session_id!);
 
   let sessionId: string;
   let runDir: string;
   const args: string[] = [];
-  if (source) {
+  if (source && canResume) {
     sessionId = source.session.session_id!;
     runDir = source.session.run_dir!;
     args.push("-p", continuePrompt(task, source.previous, run.instructions), "--resume", sessionId);
   } else {
     sessionId = randomUUID();
-    runDir = join(config.runsDir, String(run.id));
+    runDir = source?.session.run_dir ?? join(config.runsDir, String(run.id));
     // A continue whose earlier attempts never started runs as a first attempt with both instructions.
     const instructions = run.resumed_from_run_id ? `${task.prompt}\n\n${run.instructions}` : run.instructions;
     args.push("-p", firstPrompt(task, instructions), "--session-id", sessionId);
@@ -81,6 +87,9 @@ export function startRun(run: RunRow): void {
     PATH: `${config.binDir}${delimiter}${process.env.PATH ?? ""}`,
   };
   for (const key of SECRET_ENV) delete env[key];
+  // Which login Claude uses. The main account runs exactly as before (without CLAUDE_CONFIG_DIR, Claude
+  // also reads ~/.claude.json). Every account shares one projects folder, so sessions resume on any of them.
+  if (account.config_dir !== config.claudeConfigDir) env.CLAUDE_CONFIG_DIR = account.config_dir;
 
   const child = spawn(config.claudeBin, args, {
     cwd: runDir,
@@ -95,6 +104,7 @@ export function startRun(run: RunRow): void {
     session_id: sessionId,
     run_dir: runDir,
     pid: child.pid ?? null,
+    account_id: account.id,
   });
 
   const entry: Active = {
@@ -160,11 +170,15 @@ function finishRun(runId: number, code: number | null, entry: Active, spawnError
   const run = getRun(runId)!;
   const fields: Partial<RunRow> = { ended_at: now(), exit_code: code };
 
+  let retry: string | null = null;
+
   // Only fill in a status if Claude didn't report one (and nobody cancelled it).
   if (run.status === "running") {
     const output = `${entry.stdout.text}\n${entry.stderr.text}`;
     // Claude exits with an error when it hits the limit; a clean exit that merely mentions one isn't it.
-    const limit = spawnError || entry.killedFor || code === 0 ? null : detectUsageLimit(output);
+    const failed = !spawnError && !entry.killedFor && code !== 0;
+    const limit = failed ? detectUsageLimit(output) : null;
+    const loginFailed = failed && !limit && detectLoginFailure(output);
     if (entry.killedFor === "cancel") {
       fields.status = "cancelled";
     } else if (entry.killedFor === "timeout") {
@@ -176,7 +190,14 @@ function finishRun(runId: number, code: number | null, entry: Active, spawnError
     } else if (limit) {
       fields.status = "limited";
       fields.resets_at = limit.resetsAt.toISOString();
-      fields.error = `Usage limit reached. ${lastLines(output, 3)}`.trim();
+      fields.error = `Usage limit reached${accountLabel(run)}. ${lastLines(output, 3)}`.trim();
+      if (run.account_id) markLimited(run.account_id, limit.resetsAt);
+      retry = USAGE_LIMIT_MESSAGE;
+    } else if (loginFailed) {
+      fields.status = "error";
+      fields.error = `Claude's login stopped working${accountLabel(run)}. ${lastLines(output, 3)}`.trim();
+      if (run.account_id) markLoginFailed(run.account_id, lastLines(output, 3));
+      retry = LOGIN_FAILED_MESSAGE;
     } else {
       fields.status = "error";
       fields.summary = lastLines(entry.stdout.text, 20) || null;
@@ -189,15 +210,23 @@ function finishRun(runId: number, code: number | null, entry: Active, spawnError
 
   updateRun(runId, fields);
 
-  // Pick the work up again automatically once the limit resets.
-  if (fields.status === "limited") {
+  // Pick the work up again automatically, on the next account that can take it.
+  if (retry) {
     insertRun({
       task_id: run.task_id,
-      instructions: USAGE_LIMIT_MESSAGE,
+      instructions: retry,
       timeout_min: run.timeout_min,
       resumed_from_run_id: run.id,
     });
   }
+  // A fresh reading, so the next run is routed on what this one used.
+  if (run.account_id) void checkAccount(run.account_id).catch(() => {});
+}
+
+function accountLabel(run: RunRow): string {
+  if (!run.account_id) return "";
+  const row = db.prepare("SELECT name FROM accounts WHERE id = ?").get(run.account_id) as { name: string } | undefined;
+  return row ? ` on account "${row.name}"` : "";
 }
 
 // After a restart no Claude process from before is still ours to watch.

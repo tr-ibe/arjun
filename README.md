@@ -1,6 +1,6 @@
 # Arjun
 
-Runs Claude Code tasks unattended. People create tasks in the web UI, other services create them through the API, and a Docker container runs each one with `claude -p` on a Max plan. Claude reports how it went with the `update_run` command, and any task can be continued with new instructions.
+Runs Claude Code tasks unattended. People create tasks in the web UI, other services create them through the API, and a Docker container runs each one with `claude -p` on a Max plan, or on several, one after another (see [Claude accounts](#claude-accounts)). Claude reports how it went with the `update_run` command, and any task can be continued with new instructions.
 
 ## How it works
 
@@ -9,8 +9,8 @@ Runs Claude Code tasks unattended. People create tasks in the web UI, other serv
 - **The prompt** tells Claude it's on its own and must finish by running `update_run done|stuck|error "<summary>"`. That command reports to the server over localhost using the `RUN_ID` the server set.
 - **Continue** resumes the same Claude session (`--resume`) in the same folder, with new instructions.
 - **History** is Claude's own session file in `~/.claude/projects`, kept 60 days (the server sets `cleanupPeriodDays` on first start).
-- **Usage limit:** the run is marked `limited`, new runs wait until the reset time, and a continue is queued automatically.
-- Everything that must survive a redeploy is in `/home/node`, the one volume: Claude's login and history, `data/arjun.db`, and `runs/`.
+- **Usage limit:** the run is marked `limited` and a continue is queued automatically. It starts on the next Claude account with room, or, if there's only one account, after the reset time.
+- Everything that must survive a redeploy is in `/home/node`, the one volume: Claude's logins and history, `data/arjun.db`, and `runs/`.
 
 ## Run it locally with Docker
 
@@ -36,13 +36,51 @@ Open http://localhost:3000, log in with `AUTH_USERNAME` / `AUTH_PASSWORD`, and t
 
 Check that it ends as **Done** with a summary, that the timeline shows each step, and that **Continue** (e.g. "Also add the Node version to hello.txt") picks up in the same folder.
 
+## Claude accounts
+
+Arjun can use several Claude logins, tried in order. The first account takes every run until it has used 85% of its 5-hour window (or 95% of its week). After that, runs go to the second account, then the third, and so on, for as many accounts as you add. When every account is past that point, the first one with any room left is used. Only when none has room do runs wait, until the earliest reset. You can change both percentages on the Settings page.
+
+- **Before each run** the dispatcher picks the account. It uses the usage Claude reports for each account, which the server reads about once a minute (the endpoint behind Claude Code's `/usage`). It also reads an account again right after a run on it ends.
+- **If a run hits the limit anyway** (several runs started on an account that was just under the line), that account is skipped until its reset. The task continues straight away on the next account, in the same Claude session and folder. A run whose login stopped working is handled the same way, and its account shows **Needs login** until someone logs it in again.
+- **The usage endpoint isn't documented.** If it can't be read, the account is still used, and Arjun switches when Claude says the limit was reached.
+- **Settings → Claude accounts** shows each account's usage, which one new runs go to, and buttons to reorder accounts or turn them off. Each attempt on a task shows which account it ran on.
+
+### Where the accounts live
+
+| Account | Folder | How it's logged in |
+|---|---|---|
+| main (always first at the start) | `/home/node/.claude` | `claude`, then `/login` |
+| every extra account | `/home/node/accounts/<name>` | `add-account <name>` |
+
+Each extra folder links `projects` (every session) and your instructions, skills, agents, commands and plugins to the main folder. That way any account can resume any session. Its login, `.claude.json` (MCP servers) and `settings.json` belong to that account.
+
+### Adding an account
+
+Open the container's terminal: in Coolify that's the `arjun` service's **Terminal**, or locally `docker compose exec arjun bash`. Then run:
+
+```bash
+add-account second
+```
+
+Claude opens using the new account's folder. In it:
+
+1. `/login` and sign in with the second Claude account.
+2. `/mcp` and check the **Slack** connector is there and connected. claude.ai connectors belong to each login, and Slack threads can't be answered from an account without it. Add any MCP servers the main account has, too.
+3. `/exit`.
+
+`add-account` checks that the login was saved. Arjun adds the account at the end of the order within a minute, or straight away if you press **Check usage now** on the Settings page.
+
+A third, fourth or tenth account works the same way: `add-account third`, `add-account fourth`, and so on. Each new account joins at the end of the order. Move it up or down on the Settings page.
+
+To log an account in again (its row says **Needs login**), run `add-account <name>` again and use `/login`. For the main account, run `claude`. Arjun notices the new login on its next check. **Try again** on the Settings page clears the problem right away. To stop using an account, press **Turn off**. To remove it, delete its folder (`rm -rf ~/accounts/<name>`) and press **Remove**.
+
 ## Deploy on Coolify
 
 1. **New resource → Docker Compose**, pointing at this repo and branch. Coolify uses `docker-compose.yml`.
 2. **Environment variables:** fill in `AUTH_USERNAME`, `AUTH_PASSWORD` and `SESSION_SECRET` (e.g. `openssl rand -hex 32`).
 3. **Domain:** set one on the `arjun` service, port `3000`. Coolify's proxy handles HTTPS.
 4. **Deploy.** Coolify builds the image and creates the `arjun-home` volume.
-5. **Log Claude in:** open the container's **Terminal** in Coolify (it's already the `node` user), run `claude`, then `/login`, then `/exit`.
+5. **Log Claude in:** open the container's **Terminal** in Coolify (it's already the `node` user), run `claude`, then `/login`, then `/exit`. To add more accounts, see [Adding an account](#adding-an-account).
 6. **Create API keys** on the API keys page, one per caller (mytribe, trigger, agent0, …).
 
 A deploy restarts the container, which stops any running Claude processes. Those runs are marked "interrupted by restart" and can be continued. Deploy when nothing is running.
@@ -58,7 +96,7 @@ A deploy restarts the container, which stops any running Claude processes. Those
 | `OPENAI_API_KEY` | no | Passed through to Claude Code runs |
 | `PORT` | no | Default 3000 |
 
-Everything else (max concurrency, default model, effort, priority, timeout) is on the Settings page.
+Everything else (max concurrency, when to switch accounts, default model, effort, priority, timeout) is on the Settings page. Claude accounts are added in the container, not with variables.
 
 ## Slack
 
@@ -115,6 +153,8 @@ Only `prompt` is required; the rest falls back to the defaults on the Settings p
 | `GET /api/tasks` | List, filter with `status`, `type`, `source`, `q` |
 | `GET /api/tasks/:id/timeline` | Every step Claude took |
 | `GET /api/meta` | Allowed models and efforts, and the current defaults |
+
+Each attempt in `runs` has `account_name`, the Claude account it ran on.
 
 Statuses: `queued`, `running`, `done`, `stuck`, `error`, `timeout`, `limited`, `cancelled`. Poll `GET /api/tasks/:id` until it's no longer `queued` or `running`.
 

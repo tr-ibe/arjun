@@ -41,9 +41,29 @@ export interface RunRow {
   error: string | null;
   exit_code: number | null;
   resets_at: string | null;
+  account_id: number | null;
   created_at: string;
   started_at: string | null;
   ended_at: string | null;
+}
+
+// A Claude login. Each one lives in its own config folder; runs go to them in `position` order.
+export interface AccountRow {
+  id: number;
+  name: string;
+  config_dir: string;
+  position: number;
+  enabled: number;
+  limited_until: string | null;
+  login_error: string | null;
+  login_error_at: string | null;
+  five_hour_pct: number | null;
+  five_hour_resets_at: string | null;
+  seven_day_pct: number | null;
+  seven_day_resets_at: string | null;
+  usage_checked_at: string | null;
+  usage_error: string | null;
+  created_at: string;
 }
 
 export interface ApiKeyRow {
@@ -107,6 +127,26 @@ db.exec(`
     ended_at            TEXT
   );
 
+  -- Claude logins, tried in position order. limited_until is set when Claude says the limit was hit;
+  -- login_error when a run found the login no longer works. The rest is the last usage reading.
+  CREATE TABLE IF NOT EXISTS accounts (
+    id                  INTEGER PRIMARY KEY,
+    name                TEXT NOT NULL UNIQUE,
+    config_dir          TEXT NOT NULL UNIQUE,
+    position            INTEGER NOT NULL,
+    enabled             INTEGER NOT NULL DEFAULT 1,
+    limited_until       TEXT,
+    login_error         TEXT,
+    login_error_at      TEXT,
+    five_hour_pct       REAL,
+    five_hour_resets_at TEXT,
+    seven_day_pct       REAL,
+    seven_day_resets_at TEXT,
+    usage_checked_at    TEXT,
+    usage_error         TEXT,
+    created_at          TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS settings (
     key        TEXT PRIMARY KEY,
     value      TEXT NOT NULL,
@@ -135,6 +175,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS runs_status ON runs(status);
   CREATE INDEX IF NOT EXISTS tasks_type ON tasks(type);
 `);
+
+// Columns added after the first release.
+const runColumns = (db.prepare("PRAGMA table_info(runs)").all() as { name: string }[]).map((c) => c.name);
+if (!runColumns.includes("account_id")) db.exec("ALTER TABLE runs ADD COLUMN account_id INTEGER REFERENCES accounts(id)");
 
 export const now = () => new Date().toISOString();
 

@@ -72,10 +72,12 @@ function Header({ onLoggedOut }: { onLoggedOut: () => void }) {
           Log out
         </button>
       </header>
-      {status?.paused_until && (
+      {status?.paused_reason && (
         <div className="banner warn">
-          The Max plan's usage limit was reached. New runs start again after {clock(status.paused_until)}, and
-          interrupted tasks continue automatically.
+          {status.paused_reason}{" "}
+          {status.paused_until
+            ? `New runs start again after ${clock(status.paused_until)}, and interrupted tasks continue automatically.`
+            : "Queued runs wait until one can."}
         </div>
       )}
     </>

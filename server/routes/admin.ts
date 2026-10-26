@@ -1,4 +1,12 @@
 import type { FastifyInstance } from "fastify";
+import {
+  accountViews,
+  checkAllAccounts,
+  forgetAccount,
+  moveAccount,
+  resetAccount,
+  setAccountEnabled,
+} from "../accounts.js";
 import { checkLogin, clearSessionCookie, createApiKey, listApiKeys, revokeApiKey, setSessionCookie } from "../auth.js";
 import { kick } from "../dispatcher.js";
 import { EFFORTS, getSettings, MODELS, updateSettings, ValidationError } from "../settings.js";
@@ -76,5 +84,47 @@ export async function metaRoutes(app: FastifyInstance) {
         timeout_min: s.default_timeout_min,
       },
     };
+  });
+}
+
+// The Claude accounts runs go to, in order. They're added with the add-account command in the container.
+export async function accountRoutes(app: FastifyInstance) {
+  const id = (req: { params: unknown }) => Number((req.params as { id: string }).id);
+
+  app.get("/api/accounts", async () => accountViews());
+
+  // Looks for new account folders and reads every account's usage now.
+  app.post("/api/accounts/check", async () => {
+    await checkAllAccounts({ force: true });
+    kick();
+    return accountViews();
+  });
+
+  app.post("/api/accounts/:id/move", async (req) => {
+    const { direction } = (req.body ?? {}) as { direction?: unknown };
+    if (direction !== "up" && direction !== "down") throw new ValidationError("direction must be up or down.");
+    moveAccount(id(req), direction);
+    kick();
+    return accountViews();
+  });
+
+  app.patch("/api/accounts/:id", async (req) => {
+    const { enabled } = (req.body ?? {}) as { enabled?: unknown };
+    if (typeof enabled !== "boolean") throw new ValidationError("enabled must be true or false.");
+    setAccountEnabled(id(req), enabled);
+    kick();
+    return accountViews();
+  });
+
+  // Clears a login problem or a limit, so the account is tried again.
+  app.post("/api/accounts/:id/reset", async (req) => {
+    resetAccount(id(req));
+    kick();
+    return accountViews();
+  });
+
+  app.post("/api/accounts/:id/forget", async (req) => {
+    forgetAccount(id(req));
+    return accountViews();
   });
 }

@@ -14,6 +14,7 @@ export interface Run {
   error: string | null;
   exit_code: number | null;
   resets_at: string | null;
+  account_name: string | null;
   created_at: string;
   started_at: string | null;
   ended_at: string | null;
@@ -76,6 +77,29 @@ export interface Settings {
   default_effort: string;
   default_priority: number;
   default_timeout_min: number;
+  switch_at_5h_pct: number;
+  switch_at_weekly_pct: number;
+}
+
+export interface Account {
+  id: number;
+  name: string;
+  config_dir: string;
+  position: number;
+  enabled: boolean;
+  is_main: boolean;
+  folder_exists: boolean;
+  state: string;
+  next: boolean;
+  running: number;
+  limited_until: string | null;
+  login_error: string | null;
+  five_hour_pct: number | null;
+  five_hour_resets_at: string | null;
+  seven_day_pct: number | null;
+  seven_day_resets_at: string | null;
+  usage_checked_at: string | null;
+  usage_error: string | null;
 }
 
 export interface Meta {
@@ -89,6 +113,7 @@ export interface QueueStatus {
   queued: number;
   max_concurrency: number;
   paused_until: string | null;
+  paused_reason: string | null;
 }
 
 export class ApiError extends Error {

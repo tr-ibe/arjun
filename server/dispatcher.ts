@@ -1,3 +1,4 @@
+import { accountsBlocked, pickAccount, syncAccounts } from "./accounts.js";
 import { db, now, type RunRow } from "./db.js";
 import { activeCount, setOnRunEnded, startRun } from "./runner.js";
 import { getSettings } from "./settings.js";
@@ -23,11 +24,9 @@ const queuedInOrder = db.prepare(`
    ORDER BY t.priority ASC, r.created_at ASC, r.id ASC
 `);
 
-export function pausedUntil(): string | null {
-  const row = db
-    .prepare("SELECT MAX(resets_at) AS t FROM runs WHERE status = 'limited' AND resets_at > ?")
-    .get(now()) as { t: string | null };
-  return row.t;
+// Set when no Claude account can take a run: why, and when one is expected to free up.
+export function queuePaused(): { until: string | null; reason: string } | null {
+  return accountsBlocked();
 }
 
 // Place in line for each queued run, 1 = next to start.
@@ -59,11 +58,14 @@ export function kick(): void {
 
 function fill() {
   const { max_concurrency } = getSettings();
-  while (activeCount() < max_concurrency && !pausedUntil()) {
+  while (activeCount() < max_concurrency) {
     const run = nextRun.get() as RunRow | undefined;
     if (!run) return;
+    // Accounts are tried in order; this is the first with room.
+    const account = pickAccount();
+    if (!account) return;
     try {
-      startRun(run);
+      startRun(run, account);
     } catch (err) {
       db.prepare("UPDATE runs SET status = 'error', error = ?, ended_at = ? WHERE id = ?").run(
         `Could not start the run: ${(err as Error).message}`,
@@ -75,6 +77,7 @@ function fill() {
 }
 
 export function startDispatcher(): void {
+  syncAccounts();
   setOnRunEnded(() => setImmediate(kick));
   setInterval(kick, 3_000).unref();
   kick();
