@@ -13,6 +13,8 @@ services:
       - SLACK_USER_TOKEN=${SLACK_USER_TOKEN}
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
       - SLACK_ALLOWED_USERS=${SLACK_ALLOWED_USERS}
+      # Optional: passed through to Claude Code runs.
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
       - arjun-home:/home/node
     restart: unless-stopped
