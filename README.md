@@ -67,6 +67,7 @@ People talk to Arjun in Slack like a colleague: DM him, or @-mention him in a ch
 - **A new message in a known thread resumes that same session** (`--resume`): right away if it's idle. If it's busy, the message waits, and everything that arrived meanwhile goes in as one next turn.
 - **In a channel thread he's part of, he hears every message** and decides for himself whether one needs an answer. Channel messages that don't mention him, outside his threads, are ignored, as are bots, edits and his own messages.
 - **Only full members of the workspace** can start or continue a thread (no guests), or only the people in `SLACK_ALLOWED_USERS` if it's set.
+- **Slack conversations run on Sonnet 5.5 at medium effort** (`claude-sonnet-5-5`, set in `server/slack.ts`), not the Settings defaults. Every turn in a thread keeps that.
 - Slack tasks show up in the task list with the source **Slack** and a link to the thread.
 
 ### Guardrails
