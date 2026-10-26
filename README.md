@@ -55,6 +55,7 @@ A deploy restarts the container, which stops any running Claude processes. Those
 | `SESSION_SECRET` | yes | Signs the login cookie. Long random string. |
 | `SLACK_USER_TOKEN`, `SLACK_APP_TOKEN` | no | Turn on Slack, see below |
 | `SLACK_ALLOWED_USERS` | no | Slack user IDs who may talk to Arjun, comma-separated. Default: every full member of the workspace (no guests, no bots). |
+| `OPENAI_API_KEY` | no | Passed through to Claude Code runs |
 | `PORT` | no | Default 3000 |
 
 Everything else (max concurrency, default model, effort, priority, timeout) is on the Settings page.
