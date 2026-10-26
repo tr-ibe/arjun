@@ -88,6 +88,8 @@ code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
 .crumbs { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
 
 .banner { padding: 10px 20px; font-size: 14px; }
+.banner-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+button.small { padding: 3px 10px; font-size: 13px; }
 .banner.warn { background: var(--warn-bg); color: var(--warn); border-bottom: 1px solid var(--line); }
 .banner.bad { background: var(--bad-bg); color: var(--bad); border-radius: 8px; margin-bottom: 12px; }
 

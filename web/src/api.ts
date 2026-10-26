@@ -112,6 +112,7 @@ export interface QueueStatus {
   running: number;
   queued: number;
   max_concurrency: number;
+  queue_paused: boolean;
   paused_until: string | null;
   paused_reason: string | null;
 }

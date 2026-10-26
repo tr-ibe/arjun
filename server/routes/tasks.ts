@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { db, getRun, getTask, insertRun, insertTask, latestRun, now, runsForTask, updateRun, type RunRow, type TaskRow } from "../db.js";
 import { kick, queuePaused, queuePositions } from "../dispatcher.js";
 import { activeCount, isActive, stopRun } from "../runner.js";
-import { checkEffort, checkInt, checkModel, getSettings, ValidationError } from "../settings.js";
+import { checkEffort, checkInt, checkModel, getSettings, isQueuePaused, setQueuePaused, ValidationError } from "../settings.js";
 import { readTimeline } from "../timeline.js";
 
 function text(name: string, value: unknown, max: number): string {
@@ -207,6 +207,15 @@ export async function taskRoutes(app: FastifyInstance) {
     return rows.map((r) => r.type);
   });
 
+  // Pause or resume starting new runs. Running ones always finish.
+  app.post("/api/queue", async (req) => {
+    const { paused } = (req.body ?? {}) as { paused?: unknown };
+    if (typeof paused !== "boolean") throw new ValidationError("paused must be true or false.");
+    setQueuePaused(paused);
+    kick();
+    return { queue_paused: paused, running: activeCount() };
+  });
+
   app.get("/api/status", async () => {
     const queued = (db.prepare("SELECT COUNT(*) AS n FROM runs WHERE status = 'queued'").get() as { n: number }).n;
     const paused = queuePaused();
@@ -214,6 +223,7 @@ export async function taskRoutes(app: FastifyInstance) {
       running: activeCount(),
       queued,
       max_concurrency: getSettings().max_concurrency,
+      queue_paused: isQueuePaused(),
       paused_until: paused?.until ?? null,
       paused_reason: paused?.reason ?? null,
     };

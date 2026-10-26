@@ -5,8 +5,9 @@
 //   FAKE_ONLY_IN=<account folder name>   only use FAKE_OUTCOME in that account's folder, else done
 //   FAKE_SLEEP=<seconds>                                        (default 0.2)
 // When a prompt has several, the last one wins, so a continue's new instructions take effect.
+// FAKE_SLEEP also carries over from earlier turns of a resumed session, so a slow run stays slow.
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -17,8 +18,8 @@ const flag = (name) => {
 };
 const prompt = flag("-p") ?? "";
 const sessionId = flag("--session-id") ?? flag("--resume");
-const directive = (name, fallback) => {
-  const all = [...prompt.matchAll(new RegExp(`${name}=(\\S+)`, "g"))];
+const directive = (name, fallback, text = prompt) => {
+  const all = [...text.matchAll(new RegExp(`${name}=([\\w.,-]+)`, "g"))];
   return all.length ? all[all.length - 1][1] : fallback;
 };
 
@@ -38,14 +39,15 @@ if (process.env.AUTH_PASSWORD || process.env.SESSION_SECRET || process.env.SLACK
 const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 const onlyIn = directive("FAKE_ONLY_IN", null);
 const outcome = onlyIn && onlyIn !== basename(configDir) ? "done" : directive("FAKE_OUTCOME", "done");
-const sleepSec = Number(directive("FAKE_SLEEP", "0.2"));
-
 // Like Claude Code, resuming only works if this account's folder can see the session.
+let history = "";
 if (args.includes("--resume")) {
   const projects = join(configDir, "projects");
-  const found = existsSync(projects) && readdirSync(projects).some((d) => existsSync(join(projects, d, `${sessionId}.jsonl`)));
-  if (!found) fail(`No conversation found with session ID: ${sessionId}`, 1);
+  const dir = existsSync(projects) && readdirSync(projects).find((d) => existsSync(join(projects, d, `${sessionId}.jsonl`)));
+  if (!dir) fail(`No conversation found with session ID: ${sessionId}`, 1);
+  history = readFileSync(join(projects, dir, `${sessionId}.jsonl`), "utf8");
 }
+const sleepSec = Number(directive("FAKE_SLEEP", directive("FAKE_SLEEP", "0.2", history)));
 
 // Write the session the way Claude Code does.
 const projectDir = join(configDir, "projects", process.cwd().replace(/[^a-zA-Z0-9]/g, "-"));

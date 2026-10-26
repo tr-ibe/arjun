@@ -74,6 +74,16 @@ A third, fourth or tenth account works the same way: `add-account third`, `add-a
 
 To log an account in again (its row says **Needs login**), run `add-account <name>` again and use `/login`. For the main account, run `claude`. Arjun notices the new login on its next check. **Try again** on the Settings page clears the problem right away. To stop using an account, press **Turn off**. To remove it, delete its folder (`rm -rf ~/accounts/<name>`) and press **Remove**.
 
+### Swapping the Claude login behind an account
+
+To put a different Claude login behind an account, keeping its name and place in the order:
+
+1. **Turn off** the account on the Settings page, and wait until its **Running** count is 0. A run still using the old login can renew it and write it back over the new one.
+2. In the container terminal, open Claude for that account: `add-account <name>` for an extra account, or plain `claude` for main. Then `/logout`, `/login` with the new Claude account, check `/mcp` for Slack, and `/exit`.
+3. Press **Try again** if the row still shows the old account's **Limit reached** or **Needs login**, then **Turn on**.
+
+The main account can't be removed, because its folder holds every session and the shared skills. To use it less, move it down the order, or turn it off.
+
 ## Deploy on Coolify
 
 1. **New resource → Docker Compose**, pointing at this repo and branch. Coolify uses `docker-compose.yml`.
@@ -83,7 +93,16 @@ To log an account in again (its row says **Needs login**), run `add-account <nam
 5. **Log Claude in:** open the container's **Terminal** in Coolify (it's already the `node` user), run `claude`, then `/login`, then `/exit`. To add more accounts, see [Adding an account](#adding-an-account).
 6. **Create API keys** on the API keys page, one per caller (mytribe, trigger, agent0, …).
 
-A deploy restarts the container, which stops any running Claude processes. Those runs are marked "interrupted by restart" and can be continued. Deploy when nothing is running.
+### Deploying while tasks are running
+
+A deploy replaces the container, which stops every Claude process in it. To deploy without cutting anything off:
+
+1. Press **Pause new runs** at the top right of the web UI. Running tasks carry on, and nothing new starts. New tasks and Slack messages wait in the queue.
+2. Wait until the banner says nothing is running.
+3. Push to main (Coolify deploys it) or press **Deploy** in Coolify.
+4. Press **Resume** in the banner. The pause outlasts the deploy, so the queue stays paused until you do.
+
+If you can't wait, deploy anyway. Any run that was still going ends as "Interrupted by a server restart" and continues by itself after the restart, in the same Claude session and folder, with a note that the server restarted. When something was already queued to follow it (a Slack reply, or a Continue), that attempt picks it up instead. After three restarts in a row cut off the same task, it waits for someone to press **Continue**.
 
 ## Environment variables
 

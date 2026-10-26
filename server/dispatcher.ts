@@ -1,7 +1,7 @@
 import { accountsBlocked, pickAccount, syncAccounts } from "./accounts.js";
 import { db, now, type RunRow } from "./db.js";
 import { activeCount, setOnRunEnded, startRun } from "./runner.js";
-import { getSettings } from "./settings.js";
+import { getSettings, isQueuePaused } from "./settings.js";
 
 // Highest priority first (1 is highest), then oldest. A continue waits until the attempt
 // before it has finished, since both use the same Claude session.
@@ -57,6 +57,7 @@ export function kick(): void {
 }
 
 function fill() {
+  if (isQueuePaused()) return;
   const { max_concurrency } = getSettings();
   while (activeCount() < max_concurrency) {
     const run = nextRun.get() as RunRow | undefined;

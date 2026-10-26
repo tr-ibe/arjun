@@ -6,7 +6,7 @@ import { checkAccount, markLimited, markLoginFailed } from "./accounts.js";
 import { config } from "./config.js";
 import { db, getRun, getTask, insertRun, now, updateRun, type RunRow } from "./db.js";
 import { detectUsageLimit } from "./limit.js";
-import { continuePrompt, firstPrompt, LOGIN_FAILED_MESSAGE, USAGE_LIMIT_MESSAGE } from "./prompt.js";
+import { continuePrompt, firstPrompt, LOGIN_FAILED_MESSAGE, RESTART_MESSAGE, USAGE_LIMIT_MESSAGE } from "./prompt.js";
 import { detectLoginFailure } from "./routing.js";
 import { findSessionFile } from "./timeline.js";
 
@@ -229,13 +229,51 @@ function accountLabel(run: RunRow): string {
   return row ? ` on account "${row.name}"` : "";
 }
 
-// After a restart no Claude process from before is still ours to watch.
+// A run cut off by restarts this many times in a row isn't picked up again automatically.
+const MAX_RESTART_RESUMES = 3;
+
+// After a restart no Claude process from before is still ours to watch. Runs that were still going
+// continue automatically in the same session, like after a usage limit, unless something is
+// already queued to follow them (a Slack reply, say), which resumes the session anyway.
 export function recoverInterruptedRuns(): void {
-  db.prepare(
-    `UPDATE runs
-        SET status = CASE WHEN status = 'running' THEN 'error' ELSE status END,
-            error = CASE WHEN status = 'running' THEN 'Interrupted by a server restart. Use Continue to pick it up again.' ELSE error END,
-            ended_at = ?
-      WHERE started_at IS NOT NULL AND ended_at IS NULL`,
-  ).run(now());
+  const cutOff = db
+    .prepare("SELECT * FROM runs WHERE status = 'running' AND started_at IS NOT NULL AND ended_at IS NULL")
+    .all() as RunRow[];
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE runs SET ended_at = ? WHERE started_at IS NOT NULL AND ended_at IS NULL AND status != 'running'`,
+    ).run(now());
+    for (const run of cutOff) {
+      const followed = db.prepare("SELECT 1 FROM runs WHERE task_id = ? AND status = 'queued'").get(run.task_id);
+      const resume = !followed && restartResumes(run) < MAX_RESTART_RESUMES;
+      updateRun(run.id, {
+        status: "error",
+        ended_at: now(),
+        error: followed
+          ? "Interrupted by a server restart. The next queued attempt picks it up."
+          : resume
+            ? "Interrupted by a server restart. It continues automatically."
+            : "Interrupted by a server restart again. Use Continue to pick it up.",
+      });
+      if (resume) {
+        insertRun({
+          task_id: run.task_id,
+          instructions: RESTART_MESSAGE,
+          timeout_min: run.timeout_min,
+          resumed_from_run_id: run.id,
+        });
+      }
+    }
+  })();
+}
+
+// How many attempts in a row, ending with this one, were themselves restart pick-ups.
+function restartResumes(run: RunRow): number {
+  let n = 0;
+  let cur: RunRow | undefined = run;
+  while (cur && cur.instructions === RESTART_MESSAGE) {
+    n++;
+    cur = cur.resumed_from_run_id ? getRun(cur.resumed_from_run_id) : undefined;
+  }
+  return n;
 }

@@ -54,5 +54,8 @@ ${REPORTING}`;
 export const USAGE_LIMIT_MESSAGE =
   "You were interrupted because the Claude usage limit was reached. You can carry on now. Pick up where you left off and finish the task.";
 
+export const RESTART_MESSAGE =
+  "You were interrupted because the server restarted (usually a deploy). Anything you started in the background has stopped. Check where you got to, pick up where you left off and finish the task.";
+
 export const LOGIN_FAILED_MESSAGE =
   "You were interrupted because Claude's login stopped working. You can carry on now. Pick up where you left off and finish the task.";

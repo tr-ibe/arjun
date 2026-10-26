@@ -75,6 +75,20 @@ export function getSettings(): Settings {
   return result;
 }
 
+// "Pause new runs": running tasks finish, nothing new starts. Kept apart from the settings form so
+// saving the form can't undo it.
+export function isQueuePaused(): boolean {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'queue_paused'").get() as { value: string } | undefined;
+  return row ? JSON.parse(row.value) === true : false;
+}
+
+export function setQueuePaused(paused: boolean): void {
+  db.prepare(
+    `INSERT INTO settings (key, value, updated_at) VALUES ('queue_paused', ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+  ).run(JSON.stringify(paused), now());
+}
+
 export function updateSettings(patch: Record<string, unknown>): Settings {
   const clean: Partial<Settings> = {};
   for (const [key, value] of Object.entries(patch)) {

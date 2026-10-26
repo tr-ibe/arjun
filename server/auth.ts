@@ -96,7 +96,7 @@ function callerFromApiKey(req: FastifyRequest): Caller | null {
 // ---- The one check every request goes through ----
 
 const OPEN = new Set(["/api/auth/login", "/api/health"]);
-const SESSION_ONLY = ["/api/keys", "/api/settings", "/api/accounts", "/api/auth/"];
+const SESSION_ONLY = ["/api/keys", "/api/settings", "/api/accounts", "/api/queue", "/api/auth/"];
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 export async function authHook(req: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -118,7 +118,7 @@ export async function authHook(req: FastifyRequest, reply: FastifyReply): Promis
   }
 
   if (caller.kind === "api" && SESSION_ONLY.some((p) => path.startsWith(p))) {
-    return reply.code(403).send({ error: "API keys can't manage keys, settings or accounts. Log in to the web UI." });
+    return reply.code(403).send({ error: "API keys can't manage keys, settings, accounts or the queue. Log in to the web UI." });
   }
 
   // Browser requests that change something must be JSON. Other sites can't send that cross-site
