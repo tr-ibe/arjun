@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { ensureCleanupPeriod } from "./account_dir.js";
 import { startAccountChecks } from "./accounts.js";
+import { startAlerts } from "./alerts.js";
 import { buildApp } from "./app.js";
 import { config } from "./config.js";
 import { kick, startDispatcher } from "./dispatcher.js";
@@ -18,6 +19,7 @@ await app.listen({ port: config.port, host: config.host });
 await startToolChecks(app.log);
 startDispatcher();
 startAccountChecks(app.log, kick);
+startAlerts(app.log);
 try {
   await startSlack(app.log);
 } catch (err) {

@@ -7,10 +7,12 @@ import {
   resetAccount,
   setAccountEnabled,
 } from "../accounts.js";
+import { sendTestAlert } from "../alerts.js";
 import { checkLogin, clearSessionCookie, createApiKey, listApiKeys, revokeApiKey, setSessionCookie } from "../auth.js";
+import { config } from "../config.js";
 import { kick } from "../dispatcher.js";
 import { checkTools, toolViews } from "../tools.js";
-import { EFFORTS, getSettings, MODELS, updateSettings, ValidationError } from "../settings.js";
+import { ALERT_STATUSES, EFFORTS, getSettings, MODELS, updateSettings, ValidationError } from "../settings.js";
 
 // The proxy in front (Coolify) appends the real client address last, so rate-limit on that.
 function clientAddress(req: { headers: Record<string, string | string[] | undefined>; ip: string }): string {
@@ -62,12 +64,22 @@ export async function keyRoutes(app: FastifyInstance) {
 }
 
 export async function settingsRoutes(app: FastifyInstance) {
-  app.get("/api/settings", async () => ({ settings: getSettings(), models: MODELS, efforts: EFFORTS }));
+  // Alerts are posted as Arjun, so they need his Slack token.
+  const options = () => ({ models: MODELS, efforts: EFFORTS, alert_statuses: ALERT_STATUSES, slack_configured: !!config.slackUserToken });
+
+  app.get("/api/settings", async () => ({ settings: getSettings(), ...options() }));
 
   app.patch("/api/settings", async (req) => {
     const settings = updateSettings((req.body ?? {}) as Record<string, unknown>);
     kick(); // a higher limit can start queued runs right away
-    return { settings, models: MODELS, efforts: EFFORTS };
+    return { settings, ...options() };
+  });
+
+  // Posts a test message to the alert channel as it's saved now.
+  app.post("/api/alerts/test", async (_req, reply) => {
+    const result = await sendTestAlert();
+    if (!result.ok) return reply.code(400).send({ error: result.error });
+    return { ok: true };
   });
 }
 

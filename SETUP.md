@@ -89,6 +89,7 @@ On the **API keys** page, create one key per caller (mytribe, trigger, agent0, �
 - **Settings → Claude accounts:** every account is **Ready** with its 5-hour and week usage filled in.
 - **The Coolify log** says `Slack is on, as …`.
 - **DM Arjun in Slack** ("what's the date today?"). A task appears in the task list with the source **Slack**, and he replies in the thread as Arjun.
+- **Settings → Slack alerts:** set the channel (invite Arjun to it) and the console address, save, and press **Send a test alert**.
 - **Create a task** in the web UI that uses the plugin, for example `/mytribe:providers kids birthday magician in Bengaluru`, and check it finishes.
 
 ## Claude accounts

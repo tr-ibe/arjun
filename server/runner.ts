@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { checkAccount, markLimited, markLoginFailed } from "./accounts.js";
+import { alertRunEnded } from "./alerts.js";
 import { config } from "./config.js";
 import { db, getRun, getTask, insertRun, now, updateRun, type RunRow } from "./db.js";
 import { detectUsageLimit } from "./limit.js";
@@ -218,7 +219,8 @@ function finishRun(runId: number, code: number | null, entry: Active, spawnError
 
   updateRun(runId, fields);
 
-  // Pick the work up again automatically, on the next account that can take it.
+  // Pick the work up again automatically, on the next account that can take it. Only work that
+  // isn't picked up again needs a person, so only that is worth an alert.
   if (retry) {
     insertRun({
       task_id: run.task_id,
@@ -226,6 +228,8 @@ function finishRun(runId: number, code: number | null, entry: Active, spawnError
       timeout_min: run.timeout_min,
       resumed_from_run_id: run.id,
     });
+  } else {
+    alertRunEnded(runId);
   }
   // A fresh reading, so the next run is routed on what this one used.
   if (run.account_id) void checkAccount(run.account_id).catch(() => {});
@@ -247,6 +251,7 @@ export function recoverInterruptedRuns(): void {
   const cutOff = db
     .prepare("SELECT * FROM runs WHERE status = 'running' AND started_at IS NOT NULL AND ended_at IS NULL")
     .all() as RunRow[];
+  const leftForAPerson: number[] = [];
   db.transaction(() => {
     db.prepare(
       `UPDATE runs SET ended_at = ? WHERE started_at IS NOT NULL AND ended_at IS NULL AND status != 'running'`,
@@ -270,9 +275,12 @@ export function recoverInterruptedRuns(): void {
           timeout_min: run.timeout_min,
           resumed_from_run_id: run.id,
         });
+      } else if (!followed) {
+        leftForAPerson.push(run.id);
       }
     }
   })();
+  for (const id of leftForAPerson) alertRunEnded(id);
 }
 
 // How many attempts in a row, ending with this one, were themselves restart pick-ups.

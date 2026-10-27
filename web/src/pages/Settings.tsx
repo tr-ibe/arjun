@@ -8,13 +8,18 @@ interface SettingsResponse {
   settings: Settings;
   models: string[];
   efforts: string[];
+  alert_statuses: string[];
+  slack_configured: boolean;
 }
+
+const ALERT_STATUS_LABEL: Record<string, string> = { stuck: "Stuck", error: "Error", timeout: "Timed out" };
 
 export function SettingsPage() {
   const [data, setData] = useState<SettingsResponse | null>(null);
   const [form, setForm] = useState<Settings | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     api<SettingsResponse>("/api/settings").then((d) => {
@@ -42,6 +47,25 @@ export function SettingsPage() {
       setBusy(false);
     }
   }
+
+  async function testAlert() {
+    setTesting(true);
+    setMessage(null);
+    try {
+      await api("/api/alerts/test", { method: "POST" });
+      setMessage({ ok: true, text: "Test alert sent. Check the channel." });
+    } catch (err) {
+      setMessage({ ok: false, text: (err as Error).message });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  const toggleStatus = (status: string, on: boolean) =>
+    set(
+      "alert_statuses",
+      data.alert_statuses.filter((s) => (s === status ? on : form.alert_statuses.includes(s))),
+    );
 
   const models = [...new Set([...data.models, form.default_model])];
 
@@ -144,11 +168,94 @@ export function SettingsPage() {
           </Field>
         </div>
 
+        <h2>Slack alerts</h2>
+        <p className="muted">
+          Posted by Arjun in one channel: when a task ends needing someone, when the queue has been left paused, and
+          when no Claude account can take runs. Invite Arjun to the channel first.
+        </p>
+        {!data.slack_configured && (
+          <div className="form-error">
+            Set <code>SLACK_USER_TOKEN</code> to send alerts. They're posted as Arjun.
+          </div>
+        )}
+        <div className="row">
+          <Field label="Channel" htmlFor="alert_channel" hint="Its ID (in the channel's details) or name. Empty turns alerts off.">
+            <input
+              id="alert_channel"
+              placeholder="C0123ABCD or #arjun-alerts"
+              value={form.alert_channel}
+              onChange={(e) => set("alert_channel", e.target.value)}
+            />
+          </Field>
+          <Field label="Console address" htmlFor="public_url" hint="For links to the task in each alert.">
+            <input
+              id="public_url"
+              type="url"
+              placeholder="https://arjun.example.com"
+              value={form.public_url}
+              onChange={(e) => set("public_url", e.target.value)}
+            />
+          </Field>
+        </div>
+        <Field
+          label="Alert when a task ends as"
+          htmlFor="alert_status_stuck"
+          hint="Not when Arjun retries it himself (a usage limit, a broken login, a restart)."
+        >
+          <div className="checks">
+            {data.alert_statuses.map((s) => (
+              <label key={s} className="check">
+                <input
+                  id={`alert_status_${s}`}
+                  type="checkbox"
+                  checked={form.alert_statuses.includes(s)}
+                  onChange={(e) => toggleStatus(s, e.target.checked)}
+                />
+                {ALERT_STATUS_LABEL[s] ?? s}
+              </label>
+            ))}
+          </div>
+        </Field>
+        <div className="row four">
+          <Field label="Paused queue: first alert after (min)" htmlFor="alert_pause_after_min" hint="0 turns it off.">
+            <input
+              id="alert_pause_after_min"
+              type="number"
+              min={0}
+              max={1440}
+              value={form.alert_pause_after_min}
+              onChange={(e) => set("alert_pause_after_min", Number(e.target.value))}
+            />
+          </Field>
+          <Field label="Then again every (min)" htmlFor="alert_pause_every_min" hint="Until it's resumed. 0 for only once.">
+            <input
+              id="alert_pause_every_min"
+              type="number"
+              min={0}
+              max={1440}
+              value={form.alert_pause_every_min}
+              onChange={(e) => set("alert_pause_every_min", Number(e.target.value))}
+            />
+          </Field>
+        </div>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={form.alert_no_accounts}
+            onChange={(e) => set("alert_no_accounts", e.target.checked)}
+          />
+          Alert when no Claude account can take runs (all past their limits, off, or logged out), and when one can again
+        </label>
+
         {message && <div className={message.ok ? "form-ok" : "form-error"}>{message.text}</div>}
         <div className="actions">
           <button className="primary" disabled={busy}>
             {busy ? "Saving…" : "Save settings"}
           </button>
+          <button type="button" className="secondary" disabled={testing || !data.slack_configured} onClick={testAlert}>
+            {testing ? "Sending…" : "Send a test alert"}
+          </button>
+          <span className="hint">The test uses the saved channel.</span>
         </div>
       </form>
     </>
