@@ -37,6 +37,13 @@ RUN apt-get update \
 
 RUN npm install -g @anthropic-ai/claude-code
 
+# Chromium for Playwright, with the system libraries it needs (only root can install those).
+# Installed globally so skills can use it (mytribe's shortlist screenshots look for it there).
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN npm install -g playwright@1.55.0 \
+ && playwright install --with-deps chromium \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules node_modules
