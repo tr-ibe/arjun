@@ -11,6 +11,8 @@ export SESSION_SECRET=demo-secret-demo-secret-demo-secret
 export DATA_DIR="$PWD/.demo/data"
 export RUNS_DIR="$PWD/.demo/runs"
 export CLAUDE_CONFIG_DIR="$PWD/.demo/claude"
+export ACCOUNTS_DIR="$PWD/.demo/accounts"
+export PLUGINS_DIR="$PWD/.demo/plugins"
 export CLAUDE_BIN="$PWD/scripts/fake-claude.mjs"
 export APP_ROOT="$PWD"
 exec node dist/server/index.js

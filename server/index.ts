@@ -6,6 +6,7 @@ import { config } from "./config.js";
 import { kick, startDispatcher } from "./dispatcher.js";
 import { recoverInterruptedRuns } from "./runner.js";
 import { startSlack } from "./slack.js";
+import { startToolChecks } from "./tools.js";
 
 mkdirSync(config.runsDir, { recursive: true });
 ensureCleanupPeriod(config.claudeConfigDir);
@@ -13,6 +14,8 @@ recoverInterruptedRuns();
 
 const app = await buildApp();
 await app.listen({ port: config.port, host: config.host });
+// Runs start once Arjun has its plugins, so none goes out without them.
+await startToolChecks(app.log);
 startDispatcher();
 startAccountChecks(app.log, kick);
 try {

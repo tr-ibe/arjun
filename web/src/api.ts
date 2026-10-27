@@ -102,6 +102,23 @@ export interface Account {
   usage_error: string | null;
 }
 
+export interface Plugin {
+  source: string;
+  dir: string;
+  name: string | null;
+  version: string | null;
+  commit: string | null;
+  committed_at: string | null;
+  checked_at: string | null;
+  error: string | null;
+}
+
+export interface Tools {
+  plugins: Plugin[];
+  mytribe: { email: string | null; roles: string[]; checked_at: string | null; error: string | null };
+  slack: { configured: boolean; user: string | null; team: string | null; checked_at: string | null; error: string | null };
+}
+
 export interface Meta {
   models: string[];
   efforts: string[];

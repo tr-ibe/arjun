@@ -25,6 +25,18 @@ export const config = {
   accountsDir: process.env.ACCOUNTS_DIR ?? join(homedir(), "accounts"),
   usageUrl: process.env.CLAUDE_USAGE_URL ?? "https://api.anthropic.com/api/oauth/usage",
 
+  // Claude Code plugins every run gets, whichever account it's on: "<git url>#<folder in the repo>",
+  // comma-separated. Arjun keeps its own copy of each in pluginsDir. Set PLUGINS to "" for none.
+  plugins: (process.env.PLUGINS ?? "https://github.com/tr-ibe/mytribe.git#packages/shared/plugin")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+  pluginsDir: process.env.PLUGINS_DIR ?? join(homedir(), "plugins"),
+  // Slack's own MCP server, which runs use with Arjun's Slack user token (SLACK_USER_TOKEN).
+  slackUserToken: process.env.SLACK_USER_TOKEN || null,
+  slackMcpUrl: process.env.SLACK_MCP_URL ?? "https://mcp.slack.com/mcp",
+  slackApiUrl: process.env.SLACK_API_URL ?? "https://slack.com/api",
+
   binDir: join(appRoot, "bin"),
   slackGuard: join(appRoot, "dist", "cli", "slack_guard.js"),
   webDir: join(appRoot, "web", "dist"),

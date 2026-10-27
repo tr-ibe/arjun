@@ -9,6 +9,7 @@ import { detectUsageLimit } from "./limit.js";
 import { continuePrompt, firstPrompt, LOGIN_FAILED_MESSAGE, RESTART_MESSAGE, USAGE_LIMIT_MESSAGE } from "./prompt.js";
 import { detectLoginFailure } from "./routing.js";
 import { findSessionFile } from "./timeline.js";
+import { runTools } from "./tools.js";
 
 const TAIL_CHARS = 16_000;
 const KILL_GRACE_MS = 5_000;
@@ -75,8 +76,14 @@ export function startRun(run: RunRow, account: { id: number; config_dir: string 
     args.push("-p", firstPrompt(task, instructions), "--session-id", sessionId);
   }
   args.push("--model", task.model, "--effort", task.effort, "--dangerously-skip-permissions");
+  // Plugins and MCP servers from Arjun, the same on every account.
+  const tools = runTools();
+  args.push(...tools.args);
+  const settings: Record<string, unknown> = {};
+  if (tools.deny.length) settings.permissions = { deny: tools.deny };
   // Work asked for on Slack is read-only apart from pull requests, and this hook enforces it.
-  if (task.source === "slack") args.push("--settings", slackGuardSettings());
+  if (task.source === "slack") settings.hooks = slackGuardHooks();
+  if (Object.keys(settings).length) args.push("--settings", JSON.stringify(settings));
 
   mkdirSync(runDir, { recursive: true });
 
@@ -87,6 +94,7 @@ export function startRun(run: RunRow, account: { id: number; config_dir: string 
     PATH: `${config.binDir}${delimiter}${process.env.PATH ?? ""}`,
   };
   for (const key of SECRET_ENV) delete env[key];
+  Object.assign(env, tools.env);
   // Which login Claude uses. The main account runs exactly as before (without CLAUDE_CONFIG_DIR, Claude
   // also reads ~/.claude.json). Every account shares one projects folder, so sessions resume on any of them.
   if (account.config_dir !== config.claudeConfigDir) env.CLAUDE_CONFIG_DIR = account.config_dir;
@@ -139,9 +147,9 @@ export function startRun(run: RunRow, account: { id: number; config_dir: string 
   child.on("close", (code) => finish(code));
 }
 
-function slackGuardSettings(): string {
+function slackGuardHooks() {
   const hook = { type: "command", command: `node "${config.slackGuard}"` };
-  return JSON.stringify({ hooks: { PreToolUse: [{ matcher: "*", hooks: [hook] }] } });
+  return { PreToolUse: [{ matcher: "*", hooks: [hook] }] };
 }
 
 export function stopRun(runId: number, reason: "timeout" | "cancel"): boolean {

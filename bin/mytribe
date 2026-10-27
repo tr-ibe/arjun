@@ -1,0 +1,8 @@
+#!/bin/sh
+# The mytribe CLI from Arjun's own copy of the mytribe plugin, e.g. `mytribe status` or
+# `mytribe login arjun@mytribe.in` in the container's terminal.
+for cli in "${PLUGINS_DIR:-$HOME/plugins}"/*/packages/shared/plugin/scripts/mytribe.mjs; do
+  [ -f "$cli" ] && exec node "$cli" "$@"
+done
+echo "Arjun doesn't have the mytribe plugin yet. See Settings → From Arjun." >&2
+exit 1

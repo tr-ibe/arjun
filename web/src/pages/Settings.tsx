@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type Account, type Settings } from "../api";
+import { api, type Account, type Settings, type Tools } from "../api";
 import { Field } from "../components";
 import { clock, timeAgo } from "../format";
 import { useReloadable } from "../hooks";
@@ -51,6 +51,7 @@ export function SettingsPage() {
         <h1>Settings</h1>
       </div>
       <Accounts thresholds={data.settings} />
+      <ArjunTools />
       <form className="card form" onSubmit={save}>
         <h2>Queue</h2>
         <Field
@@ -263,6 +264,150 @@ function Accounts({ thresholds }: { thresholds: Settings }) {
         </p>
       )}
       {list[0]?.usage_checked_at && <p className="hint">Usage checked {timeAgo(list[0].usage_checked_at)}.</p>}
+    </section>
+  );
+}
+
+// What every run gets from Arjun itself, the same whichever Claude account it lands on.
+function ArjunTools() {
+  const tools = useReloadable(() => api<Tools>("/api/tools"), 60_000);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function check() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api<Tools>("/api/tools/check", { method: "POST" });
+      await tools.reload();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const plugins = tools.data?.plugins ?? [];
+  const mytribe = tools.data?.mytribe;
+  const slack = tools.data?.slack;
+  return (
+    <section className="card accounts">
+      <div className="latest-head">
+        <h2>From Arjun</h2>
+        <button className="secondary" disabled={busy} onClick={check}>
+          {busy ? "Checking…" : "Check now"}
+        </button>
+      </div>
+      <p className="muted">
+        Every run gets these from Arjun, whichever Claude account it lands on. The accounts only provide usage.
+      </p>
+      {error && <div className="form-error">{error}</div>}
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Plugin</th>
+              <th>Version</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {plugins.map((p) => (
+              <tr key={p.source}>
+                <td>
+                  <div className="task-title">{p.name ?? "–"}</div>
+                  <div className="sub mono">{p.source}</div>
+                </td>
+                <td>
+                  {p.version ? <span className="mono">{p.version}</span> : <span className="muted">–</span>}
+                  {p.commit && (
+                    <div className="sub">
+                      <span className="mono">{p.commit}</span>
+                      {p.committed_at && ` · ${timeAgo(p.committed_at)}`}
+                    </div>
+                  )}
+                </td>
+                <td>
+                  <span className={`pill ${p.error ? (p.version ? "pill-limited" : "pill-error") : "pill-done"}`}>
+                    {p.error ? (p.version ? "Using last copy" : "Not loaded") : "Up to date"}
+                  </span>
+                  {p.error && <div className="sub">{p.error}</div>}
+                  {p.checked_at && <div className="sub">Checked {timeAgo(p.checked_at)}</div>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {tools.data && plugins.length === 0 && <div className="empty">No plugins set. See PLUGINS in the README.</div>}
+      </div>
+      {mytribe && (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Signed in to</th>
+                <th>As</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <div className="task-title">mytribe CLI</div>
+                  <div className="sub mono">~/.mytribe</div>
+                </td>
+                <td>
+                  {mytribe.email ?? <span className="muted">–</span>}
+                  {mytribe.roles.length > 0 && <div className="sub">{mytribe.roles.join(", ")}</div>}
+                </td>
+                <td>
+                  <span className={`pill ${mytribe.error ? "pill-error" : "pill-done"}`}>
+                    {mytribe.error ? "Not working" : "Signed in"}
+                  </span>
+                  {mytribe.error && <div className="sub">{mytribe.error}</div>}
+                  {mytribe.error && (
+                    <div className="sub">
+                      To sign in again, in the container's terminal: <code>mytribe login arjun@mytribe.in</code>, then{" "}
+                      <code>mytribe login --code &lt;code&gt;</code> with the code from the email.
+                    </div>
+                  )}
+                  {mytribe.checked_at && <div className="sub">Checked {timeAgo(mytribe.checked_at)}</div>}
+                </td>
+              </tr>
+              {slack && (
+                <tr>
+                  <td>
+                    <div className="task-title">Slack</div>
+                    <div className="sub mono">Slack's MCP server</div>
+                  </td>
+                  <td>
+                    {slack.user ? (
+                      <>
+                        {slack.user}
+                        {slack.team && <div className="sub">{slack.team} workspace</div>}
+                      </>
+                    ) : (
+                      <span className="muted">–</span>
+                    )}
+                  </td>
+                  <td>
+                    <span className={`pill ${!slack.configured || slack.error ? "pill-error" : "pill-done"}`}>
+                      {!slack.configured ? "Not set up" : slack.error ? "Not working" : "Signed in"}
+                    </span>
+                    {!slack.configured && (
+                      <div className="sub">
+                        Set <code>SLACK_USER_TOKEN</code>. Until then, runs use the Slack connector of the account they're on.
+                      </div>
+                    )}
+                    {slack.error && <div className="sub">{slack.error}</div>}
+                    {slack.checked_at && <div className="sub">Checked {timeAgo(slack.checked_at)}</div>}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }

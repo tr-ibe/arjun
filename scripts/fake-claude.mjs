@@ -34,6 +34,8 @@ for (const required of ["--model", "--effort", "--dangerously-skip-permissions"]
 }
 if (!process.env.RUN_ID) fail("fake-claude: RUN_ID not set", 3);
 writeFileSync("claude-args.json", JSON.stringify(args)); // so tests can see how Claude was started
+// And which of Arjun's own variables it got (names only; the values are tokens).
+writeFileSync("claude-env.json", JSON.stringify(Object.keys(process.env).filter((k) => k.startsWith("ARJUN_"))));
 if (process.env.AUTH_PASSWORD || process.env.SESSION_SECRET || process.env.SLACK_USER_TOKEN) fail("fake-claude: secrets leaked into the environment", 4);
 
 const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");

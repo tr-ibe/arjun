@@ -9,6 +9,7 @@ import {
 } from "../accounts.js";
 import { checkLogin, clearSessionCookie, createApiKey, listApiKeys, revokeApiKey, setSessionCookie } from "../auth.js";
 import { kick } from "../dispatcher.js";
+import { checkTools, toolViews } from "../tools.js";
 import { EFFORTS, getSettings, MODELS, updateSettings, ValidationError } from "../settings.js";
 
 // The proxy in front (Coolify) appends the real client address last, so rate-limit on that.
@@ -126,5 +127,16 @@ export async function accountRoutes(app: FastifyInstance) {
   app.post("/api/accounts/:id/forget", async (req) => {
     forgetAccount(id(req));
     return accountViews();
+  });
+}
+
+// What Arjun gives every run itself, whichever Claude account it's on.
+export async function toolRoutes(app: FastifyInstance) {
+  app.get("/api/tools", async () => toolViews());
+
+  // Updates the plugins and checks the sign-ins now.
+  app.post("/api/tools/check", async () => {
+    await checkTools();
+    return toolViews();
   });
 }

@@ -8,8 +8,15 @@ import { chooseAccount, currentPct, nextFreeAt, parseUsage, type AccountState } 
 import { getSettings, ValidationError } from "./settings.js";
 
 const CHECK_EVERY_MS = 60_000;
-// With nothing queued or running, usage only needs checking now and then.
+// The usage endpoint rate-limits, so each account is read only as often as routing needs it: the
+// account new runs go to and accounts with runs on them every few minutes, the rest now and then.
+const ACTIVE_CHECK_EVERY_MS = 3 * 60_000;
 const IDLE_CHECK_EVERY_MS = 15 * 60_000;
+// A run ending reads its account again, unless it was read this recently.
+const MIN_CHECK_GAP_MS = 60_000;
+// After a "rate limited" reply, leave the account alone for this long, doubling up to the cap.
+const BACKOFF_FIRST_MS = 5 * 60_000;
+const BACKOFF_MAX_MS = 30 * 60_000;
 
 export const isMain = (a: { config_dir: string }) => a.config_dir === config.claudeConfigDir;
 
@@ -93,6 +100,12 @@ function loginChangedSince(dir: string, iso: string): boolean {
   }
 }
 
+// Accounts the usage endpoint is rate-limiting: how many times in a row, and when to try again.
+// Kept in memory; a restart starts afresh.
+const backoff = new Map<number, { times: number; until: number }>();
+const backedOff = (id: number) => (backoff.get(id)?.until ?? 0) > Date.now();
+const checkedWithin = (a: AccountRow, ms: number) => !!a.usage_checked_at && Date.now() - Date.parse(a.usage_checked_at) < ms;
+
 async function checkUsage(a: AccountRow): Promise<void> {
   const fields: Partial<AccountRow> = { usage_checked_at: now() };
   // Logging in again clears a login problem.
@@ -119,9 +132,18 @@ async function checkUsage(a: AccountRow): Promise<void> {
         signal: AbortSignal.timeout(5_000),
         redirect: "error",
       });
-      const usage = res.ok ? parseUsage(await res.json().catch(() => null)) : null;
-      if (usage) Object.assign(fields, usage, { usage_error: null });
-      else fields.usage_error = res.ok ? "Couldn't read the usage reply." : `Usage check failed (HTTP ${res.status}).`;
+      if (res.status === 429) {
+        // Its retry-after header says 0, so back off on our own. The last reading stays in use.
+        const times = (backoff.get(a.id)?.times ?? 0) + 1;
+        const until = Date.now() + Math.min(BACKOFF_MAX_MS, BACKOFF_FIRST_MS * 2 ** (times - 1));
+        backoff.set(a.id, { times, until });
+        fields.usage_error = `Anthropic is limiting usage checks. Next try at ${new Date(until).toISOString().slice(11, 16)} UTC; until then the last reading is used.`;
+      } else {
+        const usage = res.ok ? parseUsage(await res.json().catch(() => null)) : null;
+        if (usage) Object.assign(fields, usage, { usage_error: null });
+        else fields.usage_error = res.ok ? "Couldn't read the usage reply." : `Usage check failed (HTTP ${res.status}).`;
+        if (res.ok) backoff.delete(a.id);
+      }
     } catch (err) {
       fields.usage_error = `Usage check failed: ${(err as Error).message}`;
     }
@@ -129,19 +151,28 @@ async function checkUsage(a: AccountRow): Promise<void> {
   updateAccount(a.id, fields);
 }
 
+// After a run on the account ends, so the next run is routed on what this one used.
 export async function checkAccount(id: number): Promise<void> {
   const a = getAccount(id);
-  if (a) await checkUsage(a);
+  if (a && !backedOff(a.id) && !checkedWithin(a, MIN_CHECK_GAP_MS)) await checkUsage(a);
 }
 
+// `force` (Check usage now) reads every account that isn't being rate-limited.
 export async function checkAllAccounts({ force = false } = {}): Promise<void> {
   syncAccounts();
   const busy = !!db.prepare("SELECT 1 FROM runs WHERE status IN ('queued', 'running') LIMIT 1").get();
-  const due = (a: AccountRow) =>
-    force ||
-    busy ||
-    !a.usage_checked_at ||
-    Date.now() - Date.parse(a.usage_checked_at) > IDLE_CHECK_EVERY_MS;
+  const running = new Set(
+    (db.prepare("SELECT DISTINCT account_id FROM runs WHERE status = 'running'").all() as { account_id: number | null }[]).map(
+      (r) => r.account_id,
+    ),
+  );
+  const next = busy ? pickAccount()?.id : undefined;
+  const due = (a: AccountRow) => {
+    if (backedOff(a.id)) return false;
+    if (force) return true;
+    const active = running.has(a.id) || a.id === next;
+    return !checkedWithin(a, active ? ACTIVE_CHECK_EVERY_MS : IDLE_CHECK_EVERY_MS);
+  };
   await Promise.all(listAccounts().filter((a) => a.enabled && due(a)).map(checkUsage));
 }
 

@@ -1,12 +1,16 @@
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 // Used by both the server and the add-account command, so it reads no server config.
 
 // Shared with the main Claude folder rather than kept per account. `projects` holds every session,
-// so any account can resume a session another one started; the rest are customisations
-// (instructions, skills, agents, commands, plugins) that should be the same whichever account runs.
-const SHARED = ["projects", "CLAUDE.md", "skills", "agents", "commands", "plugins"];
+// so any account can resume a session another one started; the rest are customisations someone may
+// put in the main folder (instructions, agents, commands) that should be the same on every account.
+const SHARED = ["projects", "CLAUDE.md", "agents", "commands"];
+// Each account keeps its own: claude.ai syncs plugins and skills into these per login, and Arjun gives
+// every run its own plugins anyway. Older versions linked them to the main folder, which let one
+// account pick up what claude.ai synced to another.
+const OWN = ["plugins", "skills"];
 
 const exists = (path: string) => {
   try {
@@ -26,6 +30,10 @@ export function prepareAccountDir(dir: string, mainDir: string): void {
     const target = join(mainDir, name);
     const link = join(dir, name);
     if (existsSync(target) && !exists(link)) symlinkSync(target, link);
+  }
+  for (const name of OWN) {
+    const link = join(dir, name);
+    if (exists(link) && lstatSync(link).isSymbolicLink() && readlinkSync(link) === join(mainDir, name)) unlinkSync(link);
   }
   // Settings start as a copy of the main account's (enabled plugins and the like).
   const settings = join(dir, "settings.json");

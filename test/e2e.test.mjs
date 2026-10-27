@@ -29,6 +29,7 @@ before(async () => {
       RUNS_DIR: join(tmp, "runs"),
       CLAUDE_CONFIG_DIR: join(tmp, "claude"),
       CLAUDE_BIN: fakeClaude,
+      PLUGINS: "",
       APP_ROOT: root,
       MS_PER_MINUTE: "1000", // a 1-minute timeout lasts 1 second
       LOG_LEVEL: "warn",

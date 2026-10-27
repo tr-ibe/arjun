@@ -30,8 +30,9 @@ ${again ? "Logging in again" : "Setting up"} account "${name}" in ${dir}.
 
 Claude opens next, using this account's folder. In it:
   1. Run /login and sign in with the Claude account for "${name}".
-  2. Run /mcp and check the Slack connector is there and connected (Slack threads need it).
-  3. Run /exit.
+  2. Run /exit.
+
+The account only provides usage. Plugins, Slack and the rest come from Arjun (Settings → From Arjun).
 `);
 
 const res = spawnSync(process.env.CLAUDE_BIN ?? "claude", [], {

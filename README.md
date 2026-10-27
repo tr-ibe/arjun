@@ -36,11 +36,19 @@ Open http://localhost:3000, log in with `AUTH_USERNAME` / `AUTH_PASSWORD`, and t
 
 Check that it ends as **Done** with a summary, that the timeline shows each step, and that **Continue** (e.g. "Also add the Node version to hello.txt") picks up in the same folder.
 
+## What runs get from Arjun
+
+The Claude accounts only provide usage. Everything else a run needs comes from Arjun itself, the same whichever account the run lands on. Settings → **From Arjun** shows what that is and whether it's working, and **Check now** checks it all again.
+
+- **Plugins.** Arjun keeps its own copy of the mytribe plugin, the `packages/shared/plugin` folder of `tr-ibe/mytribe` on `main`. It fetches just that folder, checks for a new version every 10 minutes (or on **Update now**), and loads it into every run with `--plugin-dir`. It's the same plugin claude.ai syncs to mytribe-core logins, but it doesn't depend on which login a run uses. On a login that also gets the synced copy, Claude uses Arjun's and skips its own. The repo is private, so Arjun reads it with the GitHub CLI's login in the container: run `gh auth login` once (see [Deploy on Coolify](#deploy-on-coolify)). If an update fails, runs keep the copy Arjun already has. `PLUGINS` changes the list.
+- **The mytribe CLI's sign-in.** The CLI keeps it in the container's home folder (`~/.mytribe`), not in a Claude account, so every run uses the same one: arjun@mytribe.in. It renews itself, and several runs can share it at once. Arjun runs `mytribe status` every 10 minutes and shows who it's signed in as. If the sign-in ends, sign in again in the container's terminal: `mytribe login arjun@mytribe.in`, then `mytribe login --code <code>` with the code from the email. (`mytribe` runs the CLI from Arjun's copy of the plugin.)
+- **Slack.** Every run gets Slack's own MCP server (`mcp.slack.com`), signed in with Arjun's Slack user token (`SLACK_USER_TOKEN`), so it reads and posts as Arjun whichever Claude account it's on. The account's claude.ai Slack connector is hidden from the run (a `permissions.deny` rule), since it may be signed in as someone else. The token reaches Claude only as the environment variable the MCP config refers to, never on the command line. A run can read it, so it's no more secret than what Arjun's Slack user can do. Arjun checks every 10 minutes that the token works and that Slack's MCP server lets the app in. To set it up, see [Slack → Setting it up](#setting-it-up).
+
 ## Claude accounts
 
 Arjun can use several Claude logins, tried in order. The first account takes every run until it has used 85% of its 5-hour window (or 95% of its week). After that, runs go to the second account, then the third, and so on, for as many accounts as you add. When every account is past that point, the first one with any room left is used. Only when none has room do runs wait, until the earliest reset. You can change both percentages on the Settings page.
 
-- **Before each run** the dispatcher picks the account. It uses the usage Claude reports for each account, which the server reads about once a minute (the endpoint behind Claude Code's `/usage`). It also reads an account again right after a run on it ends.
+- **Before each run** the dispatcher picks the account. It uses the usage Claude reports for each account (the endpoint behind Claude Code's `/usage`). That endpoint rate-limits, so the server reads it only as often as routing needs: every 3 minutes for the account new runs go to and accounts with runs on them, every 15 minutes for the rest, and again when a run ends if the last reading is over a minute old. If it answers "rate limited", that account is left alone for 5 minutes, then 10, 20 and at most 30, and its last reading is used meanwhile.
 - **If a run hits the limit anyway** (several runs started on an account that was just under the line), that account is skipped until its reset. The task continues straight away on the next account, in the same Claude session and folder. A run whose login stopped working is handled the same way, and its account shows **Needs login** until someone logs it in again.
 - **The usage endpoint isn't documented.** If it can't be read, the account is still used, and Arjun switches when Claude says the limit was reached.
 - **Settings → Claude accounts** shows each account's usage, which one new runs go to, and buttons to reorder accounts or turn them off. Each attempt on a task shows which account it ran on.
@@ -52,7 +60,7 @@ Arjun can use several Claude logins, tried in order. The first account takes eve
 | main (always first at the start) | `/home/node/.claude` | `claude`, then `/login` |
 | every extra account | `/home/node/accounts/<name>` | `add-account <name>` |
 
-Each extra folder links `projects` (every session) and your instructions, skills, agents, commands and plugins to the main folder. That way any account can resume any session. Its login, `.claude.json` (MCP servers) and `settings.json` belong to that account.
+Each extra folder links `projects` (every session) and your instructions, agents and commands to the main folder. That way any account can resume any session. Its login, `.claude.json` (MCP servers), `settings.json`, and the plugins and skills claude.ai syncs to it belong to that account. Plugins every run should have come from Arjun instead (see [What runs get from Arjun](#what-runs-get-from-arjun)).
 
 ### Adding an account
 
@@ -65,8 +73,7 @@ add-account second
 Claude opens using the new account's folder. In it:
 
 1. `/login` and sign in with the second Claude account.
-2. `/mcp` and check the **Slack** connector is there and connected. claude.ai connectors belong to each login, and Slack threads can't be answered from an account without it. Add any MCP servers the main account has, too.
-3. `/exit`.
+2. `/exit`.
 
 `add-account` checks that the login was saved. Arjun adds the account at the end of the order within a minute, or straight away if you press **Check usage now** on the Settings page.
 
@@ -79,7 +86,7 @@ To log an account in again (its row says **Needs login**), run `add-account <nam
 To put a different Claude login behind an account, keeping its name and place in the order:
 
 1. **Turn off** the account on the Settings page, and wait until its **Running** count is 0. A run still using the old login can renew it and write it back over the new one.
-2. In the container terminal, open Claude for that account: `add-account <name>` for an extra account, or plain `claude` for main. Then `/logout`, `/login` with the new Claude account, check `/mcp` for Slack, and `/exit`.
+2. In the container terminal, open Claude for that account: `add-account <name>` for an extra account, or plain `claude` for main. Then `/logout`, `/login` with the new Claude account, and `/exit`.
 3. Press **Try again** if the row still shows the old account's **Limit reached** or **Needs login**, then **Turn on**.
 
 The main account can't be removed, because its folder holds every session and the shared skills. To use it less, move it down the order, or turn it off.
@@ -91,7 +98,8 @@ The main account can't be removed, because its folder holds every session and th
 3. **Domain:** set one on the `arjun` service, port `3000`. Coolify's proxy handles HTTPS.
 4. **Deploy.** Coolify builds the image and creates the `arjun-home` volume.
 5. **Log Claude in:** open the container's **Terminal** in Coolify (it's already the `node` user), run `claude`, then `/login`, then `/exit`. To add more accounts, see [Adding an account](#adding-an-account).
-6. **Create API keys** on the API keys page, one per caller (mytribe, trigger, agent0, …).
+6. **Log the GitHub CLI in**, in the same terminal: `gh auth login` → GitHub.com → HTTPS → log in with a web browser, as a GitHub user that can read `tr-ibe/mytribe`. It's saved in the volume, so it survives deploys. Arjun uses it to fetch the mytribe plugin. Runs share the container's home folder, so Claude can use this login too.
+7. **Create API keys** on the API keys page, one per caller (mytribe, trigger, agent0, …).
 
 ### Deploying while tasks are running
 
@@ -113,13 +121,14 @@ If you can't wait, deploy anyway. Any run that was still going ends as "Interrup
 | `SLACK_USER_TOKEN`, `SLACK_APP_TOKEN` | no | Turn on Slack, see below |
 | `SLACK_ALLOWED_USERS` | no | Slack user IDs who may talk to Arjun, comma-separated. Default: every full member of the workspace (no guests, no bots). |
 | `OPENAI_API_KEY` | no | Passed through to Claude Code runs |
+| `PLUGINS` | no | Plugins every run gets, as `<git url>#<folder>`, comma-separated. Default: `https://github.com/tr-ibe/mytribe.git#packages/shared/plugin`. Empty for none. |
 | `PORT` | no | Default 3000 |
 
 Everything else (max concurrency, when to switch accounts, default model, effort, priority, timeout) is on the Settings page. Claude accounts are added in the container, not with variables.
 
 ## Slack
 
-People talk to Arjun in Slack like a colleague: DM him, or @-mention him in a channel. The server is only the orchestrator. Claude Code reads the thread and replies with its own Slack tools (the Slack connector on Arjun's Claude login), and the server never posts anything.
+People talk to Arjun in Slack like a colleague: DM him, or @-mention him in a channel. The server is only the orchestrator. Claude Code reads the thread and replies with its own Slack tools (Slack's MCP server, as Arjun's Slack user), and the server never posts anything.
 
 - **One Slack thread is one task, and so one Claude Code session.** A DM, or a message that mentions Arjun, starts a session and tells it which thread to read and answer. The thread ⇄ session mapping is in `slack_threads`.
 - **A new message in a known thread resumes that same session** (`--resume`): right away if it's idle. If it's busy, the message waits, and everything that arrived meanwhile goes in as one next turn.
@@ -144,12 +153,13 @@ The shell rules are a backstop, not a sandbox: a determined script could still g
 In the Slack app at [api.slack.com/apps](https://api.slack.com/apps):
 
 1. **Socket Mode:** turn it on and create an app-level token with `connections:write`. That's `SLACK_APP_TOKEN` (`xapp-…`). Socket Mode means Slack never needs to reach the server.
-2. **OAuth & Permissions → User Token Scopes:** `users:read`, `im:history`, `channels:history`, `groups:history`, `mpim:history`. The listener only reads; replies go through Claude's connector.
-3. **Event Subscriptions:** turn them on, and under **Subscribe to events on behalf of users** add `message.im`, `message.channels`, `message.groups` and `message.mpim`.
-4. **Install the app while signed in to Slack as Arjun**, so he is the one who authorises it. The **User OAuth Token** (`xoxp-…`) is `SLACK_USER_TOKEN`.
-5. Set both tokens as environment variables (in Coolify, on the `arjun` service) and redeploy. The log says `Slack is on, as …`.
+2. **OAuth & Permissions → User Token Scopes:** for the listener, `users:read`, `im:history`, `channels:history`, `groups:history`, `mpim:history`. For Claude's Slack tools, also `search:read.public`, `search:read.private`, `search:read.im`, `search:read.mpim`, `search:read.files`, `search:read.users`, `chat:write`, `reactions:read`, `reactions:write`, `im:read`, `im:write`, `mpim:read`, `mpim:write`, `channels:read`, `groups:read`, `users:read.email`, `files:read`, `files:write`, `canvases:read`.
+3. **Agents & AI Apps:** turn on access to Slack's MCP server (Slack links it as `https://api.slack.com/apps/<app id>/app-assistant`).
+4. **Event Subscriptions:** turn them on, and under **Subscribe to events on behalf of users** add `message.im`, `message.channels`, `message.groups` and `message.mpim`.
+5. **Install the app while signed in to Slack as Arjun**, so he is the one who authorises it. The **User OAuth Token** (`xoxp-…`) is `SLACK_USER_TOKEN`. After adding scopes, reinstall; the token often stays the same and just gains them.
+6. Set both tokens as environment variables (in Coolify, on the `arjun` service) and redeploy. The log says `Slack is on, as …`.
 
-Arjun only hears channels he's a member of, so invite him to the ones he should be in. Claude Code in the container must also have the Slack connector, signed in as the same Arjun account, since that's how it reads and replies.
+Arjun only hears channels he's a member of, so invite him to the ones he should be in.
 
 ## Calling the API
 

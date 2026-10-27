@@ -33,6 +33,7 @@ async function startServer() {
       CLAUDE_CONFIG_DIR: join(tmp, "claude"),
       ACCOUNTS_DIR: join(tmp, "accounts"),
       CLAUDE_BIN: fakeClaude,
+      PLUGINS: "",
       APP_ROOT: root,
       MS_PER_MINUTE: "60000",
       LOG_LEVEL: "warn",

@@ -2,7 +2,7 @@
 // `claude`, and a stand-in for Claude's usage endpoint whose numbers each test sets.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -19,8 +19,11 @@ let server;
 let usageServer;
 let cookie;
 
-// What the usage endpoint reports, by account (its token is "tok-<name>").
+// What the usage endpoint reports, by account (its token is "tok-<name>"), how often each was asked,
+// and which ones it answers "rate limited".
 const usage = {};
+const hits = {};
+const rateLimited = new Set();
 const LATER = new Date(Date.now() + 3 * 3600_000).toISOString();
 const setUsage = (name, fiveHour) => {
   usage[name] = { five_hour: { utilization: fiveHour, resets_at: LATER }, seven_day: { utilization: 10, resets_at: LATER } };
@@ -38,6 +41,11 @@ before(async () => {
   chmodSync(fakeClaude, 0o755);
   usageServer = createServer((req, res) => {
     const name = (req.headers.authorization ?? "").replace("Bearer tok-", "");
+    hits[name] = (hits[name] ?? 0) + 1;
+    if (rateLimited.has(name)) {
+      res.writeHead(429, { "retry-after": "0" }).end(JSON.stringify({ error: { type: "rate_limit_error" } }));
+      return;
+    }
     if (req.headers["anthropic-beta"] !== "oauth-2025-04-20" || !usage[name]) {
       res.writeHead(401).end("{}");
       return;
@@ -50,6 +58,9 @@ before(async () => {
   login(join(accountsDir, "second"), "second");
   login(join(accountsDir, "third"), "third");
   mkdirSync(join(accountsDir, "not-logged-in"), { recursive: true }); // ignored until it has a login
+  // Older versions shared the main folder's plugins and skills; that link goes.
+  mkdirSync(join(mainDir, "plugins"), { recursive: true });
+  symlinkSync(join(mainDir, "plugins"), join(accountsDir, "third", "plugins"));
   for (const name of ["main", "second", "third"]) setUsage(name, 10);
 
   server = spawn(process.execPath, [join(root, "dist/server/index.js")], {
@@ -66,6 +77,7 @@ before(async () => {
       ACCOUNTS_DIR: accountsDir,
       CLAUDE_USAGE_URL: `http://127.0.0.1:${usageServer.address().port}/api/oauth/usage`,
       CLAUDE_BIN: fakeClaude,
+      PLUGINS: "",
       APP_ROOT: root,
       MS_PER_MINUTE: "1000",
       LOG_LEVEL: "warn",
@@ -129,6 +141,9 @@ test("finds the main account and the logged-in folders, in that order, and reads
   assert.ok(accounts.every((a) => a.state === "Ready"));
   // Extra accounts share the main account's sessions.
   assert.ok(lstatSync(join(accountsDir, "second", "projects")).isSymbolicLink());
+  // Plugins and skills that claude.ai syncs stay with their own login.
+  assert.ok(!existsSync(join(accountsDir, "second", "plugins")));
+  assert.ok(!existsSync(join(accountsDir, "third", "plugins")));
   assert.equal(JSON.parse(readFileSync(join(accountsDir, "second", "settings.json"), "utf8")).cleanupPeriodDays, 60);
 });
 
@@ -229,4 +244,23 @@ test("a turned-off account is skipped", async () => {
   await call("PATCH", `/api/accounts/${byName(accounts, "main").id}`, { enabled: true });
   assert.equal((await runTask("hello")).latest_run.account_name, "main");
   assert.ok(!existsSync(join(accountsDir, "not-logged-in", "projects")));
+});
+
+test("a run ending doesn't read its account again when it was just read", async () => {
+  await check();
+  const before = hits.main;
+  assert.equal((await runTask("hello")).latest_run.account_name, "main");
+  assert.equal(hits.main, before);
+});
+
+test("when the usage endpoint rate-limits, the account is left alone for a while and its last reading kept", async () => {
+  rateLimited.add("second");
+  let second = byName(await check(), "second");
+  assert.match(second.usage_error, /limiting usage checks. Next try at \d\d:\d\d UTC/);
+  assert.equal(typeof second.five_hour_pct, "number");
+
+  const before = hits.second;
+  second = byName(await check(), "second"); // even Check usage now waits
+  assert.equal(hits.second, before);
+  rateLimited.delete("second");
 });
