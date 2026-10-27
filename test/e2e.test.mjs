@@ -139,6 +139,20 @@ test("runs a task from an API key to done, with timeline and source", async () =
   assert.deepEqual((await call("GET", "/api/types")).data, ["provider-profile"]);
 });
 
+test("lists tasks a page at a time, newest first, with the total", async () => {
+  const made = [];
+  for (let i = 0; i < 3; i++) made.push(await createTask({ prompt: "page me", type: "paging" }));
+  const page = async (offset) => (await call("GET", `/api/tasks?type=paging&limit=2&offset=${offset}`)).data;
+  const first = await page(0);
+  assert.equal(first.total, 3);
+  assert.equal(first.has_more, true);
+  assert.deepEqual(first.items.map((t) => t.id), [made[2].id, made[1].id]);
+  const second = await page(2);
+  assert.equal(second.total, 3);
+  assert.equal(second.has_more, false);
+  assert.deepEqual(second.items.map((t) => t.id), [made[0].id]);
+});
+
 test("continues a stuck task in the same session and folder", async () => {
   const task = await createTask({ prompt: "Try it. FAKE_OUTCOME=stuck" });
   const stuck = await waitFor(task.id, "stuck");

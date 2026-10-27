@@ -40,9 +40,9 @@ Check that it ends as **Done** with a summary, that the timeline shows each step
 
 The Claude accounts only provide usage. Everything else a run needs comes from Arjun itself, the same whichever account the run lands on. Settings → **From Arjun** shows what that is and whether it's working, and **Check now** checks it all again.
 
-- **Plugins.** Arjun keeps its own copy of the mytribe plugin, the `packages/shared/plugin` folder of `tr-ibe/mytribe` on `main`. It fetches just that folder, checks for a new version every 10 minutes (or on **Update now**), and loads it into every run with `--plugin-dir`. It's the same plugin claude.ai syncs to mytribe-core logins, but it doesn't depend on which login a run uses. On a login that also gets the synced copy, Claude uses Arjun's and skips its own. The repo is private, so Arjun reads it with the GitHub CLI's login in the container: run `gh auth login` once (see [Deploy on Coolify](#deploy-on-coolify)). If an update fails, runs keep the copy Arjun already has. `PLUGINS` changes the list.
+- **Plugins.** Arjun keeps its own copy of the mytribe plugin, the `packages/shared/plugin` folder of `tr-ibe/mytribe` on `main`. It fetches just that folder, checks for a new version every 10 minutes (or on **Check now**), and loads it into every run with `--plugin-dir`. It's the same plugin claude.ai syncs to mytribe-core logins, but it doesn't depend on which login a run uses. On a login that also gets the synced copy, Claude uses Arjun's and skips its own. The repo is private, so Arjun reads it with the GitHub CLI's login in the container: run `gh auth login` once (see [SETUP.md](SETUP.md#3-log-in-in-the-containers-terminal)). If an update fails, runs keep the copy Arjun already has. `PLUGINS` changes the list.
 - **The mytribe CLI's sign-in.** The CLI keeps it in the container's home folder (`~/.mytribe`), not in a Claude account, so every run uses the same one: arjun@mytribe.in. It renews itself, and several runs can share it at once. Arjun runs `mytribe status` every 10 minutes and shows who it's signed in as. If the sign-in ends, sign in again in the container's terminal: `mytribe login arjun@mytribe.in`, then `mytribe login --code <code>` with the code from the email. (`mytribe` runs the CLI from Arjun's copy of the plugin.)
-- **Slack.** Every run gets Slack's own MCP server (`mcp.slack.com`), signed in with Arjun's Slack user token (`SLACK_USER_TOKEN`), so it reads and posts as Arjun whichever Claude account it's on. The account's claude.ai Slack connector is hidden from the run (a `permissions.deny` rule), since it may be signed in as someone else. The token reaches Claude only as the environment variable the MCP config refers to, never on the command line. A run can read it, so it's no more secret than what Arjun's Slack user can do. Arjun checks every 10 minutes that the token works and that Slack's MCP server lets the app in. To set it up, see [Slack → Setting it up](#setting-it-up).
+- **Slack.** Every run gets Slack's own MCP server (`mcp.slack.com`), signed in with Arjun's Slack user token (`SLACK_USER_TOKEN`), so it reads and posts as Arjun whichever Claude account it's on. The account's claude.ai Slack connector is hidden from the run (a `permissions.deny` rule), since it may be signed in as someone else. The token reaches Claude only as the environment variable the MCP config refers to, never on the command line. A run can read it, so it's no more secret than what Arjun's Slack user can do. Arjun checks every 10 minutes that the token works and that Slack's MCP server lets the app in. To set it up, see [SETUP.md → The Slack app](SETUP.md#1-the-slack-app).
 
 ## Claude accounts
 
@@ -62,44 +62,13 @@ Arjun can use several Claude logins, tried in order. The first account takes eve
 
 Each extra folder links `projects` (every session) and your instructions, agents and commands to the main folder. That way any account can resume any session. Its login, `.claude.json` (MCP servers), `settings.json`, and the plugins and skills claude.ai syncs to it belong to that account. Plugins every run should have come from Arjun instead (see [What runs get from Arjun](#what-runs-get-from-arjun)).
 
-### Adding an account
+### Adding, removing and swapping accounts
 
-Open the container's terminal: in Coolify that's the `arjun` service's **Terminal**, or locally `docker compose exec arjun bash`. Then run:
-
-```bash
-add-account second
-```
-
-Claude opens using the new account's folder. In it:
-
-1. `/login` and sign in with the second Claude account.
-2. `/exit`.
-
-`add-account` checks that the login was saved. Arjun adds the account at the end of the order within a minute, or straight away if you press **Check usage now** on the Settings page.
-
-A third, fourth or tenth account works the same way: `add-account third`, `add-account fourth`, and so on. Each new account joins at the end of the order. Move it up or down on the Settings page.
-
-To log an account in again (its row says **Needs login**), run `add-account <name>` again and use `/login`. For the main account, run `claude`. Arjun notices the new login on its next check. **Try again** on the Settings page clears the problem right away. To stop using an account, press **Turn off**. To remove it, delete its folder (`rm -rf ~/accounts/<name>`) and press **Remove**.
-
-### Swapping the Claude login behind an account
-
-To put a different Claude login behind an account, keeping its name and place in the order:
-
-1. **Turn off** the account on the Settings page, and wait until its **Running** count is 0. A run still using the old login can renew it and write it back over the new one.
-2. In the container terminal, open Claude for that account: `add-account <name>` for an extra account, or plain `claude` for main. Then `/logout`, `/login` with the new Claude account, and `/exit`.
-3. Press **Try again** if the row still shows the old account's **Limit reached** or **Needs login**, then **Turn on**.
-
-The main account can't be removed, because its folder holds every session and the shared skills. To use it less, move it down the order, or turn it off.
+In the container's terminal, `add-account <name>`, then `/login` and `/exit`. The account joins the end of the order. [SETUP.md → Claude accounts](SETUP.md#claude-accounts) has the steps for adding, removing, logging in again and putting a different subscription behind an account.
 
 ## Deploy on Coolify
 
-1. **New resource → Docker Compose**, pointing at this repo and branch. Coolify uses `docker-compose.yml`.
-2. **Environment variables:** fill in `AUTH_USERNAME`, `AUTH_PASSWORD` and `SESSION_SECRET` (e.g. `openssl rand -hex 32`).
-3. **Domain:** set one on the `arjun` service, port `3000`. Coolify's proxy handles HTTPS.
-4. **Deploy.** Coolify builds the image and creates the `arjun-home` volume.
-5. **Log Claude in:** open the container's **Terminal** in Coolify (it's already the `node` user), run `claude`, then `/login`, then `/exit`. To add more accounts, see [Adding an account](#adding-an-account).
-6. **Log the GitHub CLI in**, in the same terminal: `gh auth login` → GitHub.com → HTTPS → log in with a web browser, as a GitHub user that can read `tr-ibe/mytribe`. It's saved in the volume, so it survives deploys. Arjun uses it to fetch the mytribe plugin. Runs share the container's home folder, so Claude can use this login too.
-7. **Create API keys** on the API keys page, one per caller (mytribe, trigger, agent0, …).
+[SETUP.md](SETUP.md) has every step: the Slack app, the Coolify app and its environment variables, the logins in the container (Claude, GitHub, the mytribe CLI), API keys and the checks, plus how to move Arjun to another server. Coolify doesn't deploy on a push to `main`; press **Deploy** in Coolify.
 
 ### Deploying while tasks are running
 
@@ -107,7 +76,7 @@ A deploy replaces the container, which stops every Claude process in it. To depl
 
 1. Press **Pause new runs** at the top right of the web UI. Running tasks carry on, and nothing new starts. New tasks and Slack messages wait in the queue.
 2. Wait until the banner says nothing is running.
-3. Push to main (Coolify deploys it) or press **Deploy** in Coolify.
+3. Press **Deploy** in Coolify.
 4. Press **Resume** in the banner. The pause outlasts the deploy, so the queue stays paused until you do.
 
 If you can't wait, deploy anyway. Any run that was still going ends as "Interrupted by a server restart" and continues by itself after the restart, in the same Claude session and folder, with a note that the server restarted. When something was already queued to follow it (a Slack reply, or a Continue), that attempt picks it up instead. After three restarts in a row cut off the same task, it waits for someone to press **Continue**.
@@ -150,16 +119,7 @@ The shell rules are a backstop, not a sandbox: a determined script could still g
 
 ### Setting it up
 
-In the Slack app at [api.slack.com/apps](https://api.slack.com/apps):
-
-1. **Socket Mode:** turn it on and create an app-level token with `connections:write`. That's `SLACK_APP_TOKEN` (`xapp-…`). Socket Mode means Slack never needs to reach the server.
-2. **OAuth & Permissions → User Token Scopes:** for the listener, `users:read`, `im:history`, `channels:history`, `groups:history`, `mpim:history`. For Claude's Slack tools, also `search:read.public`, `search:read.private`, `search:read.im`, `search:read.mpim`, `search:read.files`, `search:read.users`, `chat:write`, `reactions:read`, `reactions:write`, `im:read`, `im:write`, `mpim:read`, `mpim:write`, `channels:read`, `groups:read`, `users:read.email`, `files:read`, `files:write`, `canvases:read`.
-3. **Agents & AI Apps:** turn on access to Slack's MCP server (Slack links it as `https://api.slack.com/apps/<app id>/app-assistant`).
-4. **Event Subscriptions:** turn them on, and under **Subscribe to events on behalf of users** add `message.im`, `message.channels`, `message.groups` and `message.mpim`.
-5. **Install the app while signed in to Slack as Arjun**, so he is the one who authorises it. The **User OAuth Token** (`xoxp-…`) is `SLACK_USER_TOKEN`. After adding scopes, reinstall; the token often stays the same and just gains them.
-6. Set both tokens as environment variables (in Coolify, on the `arjun` service) and redeploy. The log says `Slack is on, as …`.
-
-Arjun only hears channels he's a member of, so invite him to the ones he should be in.
+[SETUP.md → The Slack app](SETUP.md#1-the-slack-app) has the Slack app's settings and scopes. Set `SLACK_USER_TOKEN` and `SLACK_APP_TOKEN` in Coolify and deploy; the log then says `Slack is on, as …`. Arjun only hears channels he's a member of, so invite him to the ones he should be in.
 
 ## Calling the API
 

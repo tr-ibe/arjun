@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type ApiKey, type TaskListItem } from "../api";
 import { StatusPill } from "../components";
@@ -10,23 +10,39 @@ const PAGE = 50;
 
 export function Tasks() {
   const [params, setParams] = useSearchParams();
-  const [limit, setLimit] = useState(PAGE);
+  const page = Math.max(1, Number(params.get("page")) || 1);
   const status = params.get("status") ?? "";
   const type = params.get("type") ?? "";
   const source = params.get("source") ?? "";
   const q = params.get("q") ?? "";
 
-  const query = new URLSearchParams({ limit: String(limit) });
+  const query = new URLSearchParams({ limit: String(PAGE), offset: String((page - 1) * PAGE) });
   if (status) query.set("status", status);
   if (type) query.set("type", type);
   if (source) query.set("source", source);
   if (q) query.set("q", q);
 
   const { data, error } = useReloadable(
-    () => api<{ items: TaskListItem[]; has_more: boolean }>(`/api/tasks?${query}`),
+    () => api<{ items: TaskListItem[]; has_more: boolean; total: number }>(`/api/tasks?${query}`),
     5000,
     [query.toString()],
+    { keepData: true },
   );
+  const pages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE));
+
+  // A page past the end (tasks were deleted, or an old link) goes to the last one.
+  useEffect(() => {
+    if (data && page > pages) goTo(pages);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, page, pages]);
+
+  function goTo(n: number) {
+    const next = new URLSearchParams(params);
+    if (n > 1) next.set("page", String(n));
+    else next.delete("page");
+    setParams(next);
+    window.scrollTo({ top: 0 });
+  }
   const types = usePolling(() => api<string[]>("/api/types"), 30000) ?? [];
   const keys = usePolling(() => api<ApiKey[]>("/api/keys"), 60000) ?? [];
 
@@ -34,8 +50,8 @@ export function Tasks() {
     const next = new URLSearchParams(params);
     if (value) next.set(name, value);
     else next.delete(name);
+    next.delete("page"); // new filters start from the first page
     setParams(next, { replace: true });
-    setLimit(PAGE);
   }
 
   return (
@@ -137,10 +153,18 @@ export function Tasks() {
           </div>
         )}
       </div>
-      {data?.has_more && (
-        <button className="secondary load-more" onClick={() => setLimit((l) => l + PAGE)}>
-          Show more
-        </button>
+      {data && data.total > PAGE && (
+        <nav className="pagination" aria-label="Pages">
+          <button className="secondary" disabled={page <= 1} onClick={() => goTo(page - 1)}>
+            ← Newer
+          </button>
+          <span className="muted">
+            {(page - 1) * PAGE + 1}–{Math.min(page * PAGE, data.total)} of {data.total} · Page {page} of {pages}
+          </span>
+          <button className="secondary" disabled={page >= pages} onClick={() => goTo(page + 1)}>
+            Older →
+          </button>
+        </nav>
       )}
     </>
   );

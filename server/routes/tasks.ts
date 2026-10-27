@@ -88,7 +88,7 @@ export async function taskRoutes(app: FastifyInstance) {
     const limit = q.limit ? checkInt("limit", q.limit, 1, 200) : 50;
     const offset = q.offset ? checkInt("offset", q.offset, 0, 1_000_000) : 0;
     const where: string[] = [];
-    const params: Record<string, unknown> = { limit: limit + 1, offset };
+    const params: Record<string, unknown> = {};
     if (q.status) {
       where.push("r.status = @status");
       params.status = q.status;
@@ -109,19 +109,22 @@ export async function taskRoutes(app: FastifyInstance) {
       params.q = `%${q.q}%`;
     }
 
+    // Each task with its latest attempt, which is what the status filter looks at.
+    const from = `FROM tasks t
+           JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = t.id ORDER BY attempt DESC LIMIT 1)
+           LEFT JOIN api_keys k ON k.id = t.api_key_id
+          ${where.length ? `WHERE ${where.join(" AND ")}` : ""}`;
+    const total = (db.prepare(`SELECT COUNT(*) AS n ${from}`).get(params) as { n: number }).n;
     const rows = db
       .prepare(
         `SELECT t.*, k.name AS key_name,
                 r.id AS run_id, r.attempt, r.status, r.summary, r.error,
                 r.created_at AS run_created_at, r.started_at, r.ended_at, r.resets_at
-           FROM tasks t
-           JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = t.id ORDER BY attempt DESC LIMIT 1)
-           LEFT JOIN api_keys k ON k.id = t.api_key_id
-          ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+           ${from}
           ORDER BY t.id DESC
           LIMIT @limit OFFSET @offset`,
       )
-      .all(params) as (TaskRow & Record<string, unknown>)[];
+      .all({ ...params, limit: limit + 1, offset }) as (TaskRow & Record<string, unknown>)[];
 
     const positions = queuePositions();
     const items = rows.slice(0, limit).map((row) => ({
@@ -147,7 +150,7 @@ export async function taskRoutes(app: FastifyInstance) {
         queue_position: positions.get(row.run_id as number) ?? null,
       },
     }));
-    return { items, has_more: rows.length > limit };
+    return { items, has_more: rows.length > limit, total };
   });
 
   app.get("/api/tasks/:id", async (req, reply) => {

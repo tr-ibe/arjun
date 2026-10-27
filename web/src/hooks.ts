@@ -27,8 +27,14 @@ export function usePolling<T>(load: () => Promise<T>, ms: number, deps: unknown[
   return data;
 }
 
-// Same, but also returns a function to reload right away (after an action).
-export function useReloadable<T>(load: () => Promise<T>, ms: number | null, deps: unknown[] = []) {
+// Same, but also returns a function to reload right away (after an action). With `keepData`, a change
+// in deps keeps showing the old data until the new data arrives (say, the next page of a list).
+export function useReloadable<T>(
+  load: () => Promise<T>,
+  ms: number | null,
+  deps: unknown[] = [],
+  { keepData = false } = {},
+) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const loadRef = useRef(load);
@@ -45,7 +51,7 @@ export function useReloadable<T>(load: () => Promise<T>, ms: number | null, deps
   }, []);
 
   useEffect(() => {
-    setData(null);
+    if (!keepData) setData(null);
     void reload();
     if (!ms) return;
     const timer = setInterval(() => !document.hidden && void reload(), ms);
