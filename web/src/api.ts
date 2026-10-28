@@ -79,6 +79,12 @@ export interface Settings {
   default_timeout_min: number;
   switch_at_5h_pct: number;
   switch_at_weekly_pct: number;
+  alert_channel: string;
+  public_url: string;
+  alert_statuses: string[];
+  alert_pause_after_min: number;
+  alert_pause_every_min: number;
+  alert_no_accounts: boolean;
 }
 
 export interface Account {

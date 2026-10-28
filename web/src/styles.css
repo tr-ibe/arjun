@@ -127,6 +127,9 @@ input, select, textarea {
 }
 textarea { resize: vertical; font-family: var(--font); }
 input.narrow { width: 110px; }
+input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--accent); }
+.checks { display: flex; gap: 8px 18px; flex-wrap: wrap; }
+.check { display: inline-flex; align-items: center; gap: 7px; font-weight: 450; }
 label { font-weight: 550; font-size: 13.5px; }
 
 .card {

@@ -93,11 +93,11 @@ If you can't wait, deploy anyway. Any run that was still going ends as "Interrup
 | `PLUGINS` | no | Plugins every run gets, as `<git url>#<folder>`, comma-separated. Default: `https://github.com/tr-ibe/mytribe.git#packages/shared/plugin`. Empty for none. |
 | `PORT` | no | Default 3000 |
 
-Everything else (max concurrency, when to switch accounts, default model, effort, priority, timeout) is on the Settings page. Claude accounts are added in the container, not with variables.
+Everything else (max concurrency, when to switch accounts, default model, effort, priority, timeout, Slack alerts) is on the Settings page. Claude accounts are added in the container, not with variables.
 
 ## Slack
 
-People talk to Arjun in Slack like a colleague: DM him, or @-mention him in a channel. The server is only the orchestrator. Claude Code reads the thread and replies with its own Slack tools (Slack's MCP server, as Arjun's Slack user), and the server never posts anything.
+People talk to Arjun in Slack like a colleague: DM him, or @-mention him in a channel. The server is only the orchestrator. Claude Code reads the thread and replies with its own Slack tools (Slack's MCP server, as Arjun's Slack user). The server never posts in a conversation; the only thing it posts is [alerts](#alerts).
 
 - **One Slack thread is one task, and so one Claude Code session.** A DM, or a message that mentions Arjun, starts a session and tells it which thread to read and answer. The thread ⇄ session mapping is in `slack_threads`.
 - **A new message in a known thread resumes that same session** (`--resume`): right away if it's idle. If it's busy, the message waits, and everything that arrived meanwhile goes in as one next turn.
@@ -120,6 +120,16 @@ The shell rules are a backstop, not a sandbox: a determined script could still g
 ### Setting it up
 
 [SETUP.md → The Slack app](SETUP.md#1-the-slack-app) has the Slack app's settings and scopes. Set `SLACK_USER_TOKEN` and `SLACK_APP_TOKEN` in Coolify and deploy; the log then says `Slack is on, as …`. Arjun only hears channels he's a member of, so invite him to the ones he should be in.
+
+## Alerts
+
+The server posts alerts in one Slack channel, as Arjun (with `SLACK_USER_TOKEN`, so nothing extra to set up in Slack). Set the channel on the Settings page, invite Arjun to it, and press **Send a test alert**. No channel means no alerts. Set **Console address** too, so each alert links to the task.
+
+- **A task ends stuck, with an error, or timed out** (each can be turned off). One alert per attempt, with the summary or error. Not when Arjun picks the work up again himself: a usage limit, a login that stopped working, or a restart that it continues from.
+- **The queue has been left paused** (Pause new runs): after 10 minutes, then every 10 minutes until it's resumed, then once to say it's running again. Both times can be changed; 0 turns them off.
+- **No Claude account can take runs**: every account is past the switch points, turned off or logged out. Once when it starts, with when the first one frees up, and once when an account can take runs again.
+
+Alerts never hold up the queue: if Slack can't be reached, the alert is logged and dropped. The pause and account alerts remember what they've sent across a deploy, so a restart doesn't repeat them.
 
 ## Calling the API
 

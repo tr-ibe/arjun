@@ -1,4 +1,5 @@
 import { accountsBlocked, pickAccount, syncAccounts } from "./accounts.js";
+import { alertRunEnded } from "./alerts.js";
 import { db, now, type RunRow } from "./db.js";
 import { activeCount, setOnRunEnded, startRun } from "./runner.js";
 import { getSettings, isQueuePaused } from "./settings.js";
@@ -73,6 +74,7 @@ function fill() {
         now(),
         run.id,
       );
+      alertRunEnded(run.id);
     }
   }
 }
