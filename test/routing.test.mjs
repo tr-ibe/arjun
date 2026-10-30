@@ -12,6 +12,7 @@ const account = (id, fields = {}) => ({
   id,
   name: `a${id}`,
   position: id,
+  is_main: id === 1,
   enabled: true,
   folder_exists: true,
   login_error: null,
@@ -24,11 +25,11 @@ const account = (id, fields = {}) => ({
 });
 const pick = (accounts) => chooseAccount(accounts, T, NOW)?.id ?? null;
 
-test("the primary (first in order) takes every run while it's under the switch-over point", () => {
+test("main is the primary and takes every run while it's under the switch-over point", () => {
   const low = { five_hour_pct: 40, five_hour_resets_at: LATER };
   assert.equal(pick([account(1, low), account(2), account(3)]), 1);
-  // Position decides, not list order.
-  assert.equal(pick([account(1, { position: 3 }), account(2, { position: 1, ...low }), account(3, { position: 2 })]), 2);
+  // Wherever it is in the list or the order.
+  assert.equal(pick([account(2, { position: 1 }), account(3, { position: 2 }), account(1, { position: 3, ...low })]), 1);
 });
 
 test("past the switch-over point, runs go to the pool account whose room would reset sooner", () => {
@@ -109,11 +110,11 @@ test("a limited primary stays primary, so the pool shares the runs rather than f
   assert.equal(pick([account(1, { limited_until: LATER }), account(2), account(3, best)]), 3);
 });
 
-test("with the first account off or logged out, the next one is primary", () => {
+test("with main off or logged out there's no primary, and every run is shared between the fallbacks", () => {
   const low = { five_hour_pct: 40, five_hour_resets_at: LATER };
   const best = { five_hour_pct: 10, five_hour_resets_at: inHours(1) };
-  assert.equal(pick([account(1, { enabled: false }), account(2, low), account(3, best)]), 2);
-  assert.equal(pick([account(1, { login_error: "x" }), account(2, low), account(3, best)]), 2);
+  assert.equal(pick([account(1, { enabled: false }), account(2, low), account(3, best)]), 3);
+  assert.equal(pick([account(1, { login_error: "x" }), account(2, low), account(3, best)]), 3);
 });
 
 test("the weekly window counts too", () => {

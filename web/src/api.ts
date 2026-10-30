@@ -91,7 +91,6 @@ export interface Account {
   id: number;
   name: string;
   config_dir: string;
-  position: number;
   enabled: boolean;
   is_main: boolean;
   is_primary: boolean;

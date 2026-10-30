@@ -210,20 +210,10 @@ test("an account whose usage has no weekly window has no weekly limit", async ()
   assert.equal(byName(accounts, "second").weekly_limit, true);
 });
 
-test("moving an account to the top makes it the primary", async () => {
+test("accounts can't be reordered: main is always the primary", async () => {
   const accounts = await check();
-  const third = byName(accounts, "third").id;
-  await call("POST", `/api/accounts/${third}/move`, { direction: "up" });
-  await call("POST", `/api/accounts/${third}/move`, { direction: "up" });
-  const moved = (await call("GET", "/api/accounts")).data;
-  assert.deepEqual(
-    moved.map((a) => a.name),
-    ["third", "main", "second"],
-  );
-  assert.equal(byName(moved, "third").is_primary, true);
-  assert.equal((await runTask("hello")).latest_run.account_name, "third");
-  await call("POST", `/api/accounts/${third}/move`, { direction: "down" });
-  await call("POST", `/api/accounts/${third}/move`, { direction: "down" });
+  assert.equal((await call("POST", `/api/accounts/${byName(accounts, "third").id}/move`, { direction: "up" })).status, 404);
+  assert.equal(byName(accounts, "main").is_primary, true);
 });
 
 test("a run that hits the limit continues the same session on another account", async () => {

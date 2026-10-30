@@ -96,11 +96,10 @@ export function SettingsPage() {
 
         <h2>Sharing runs between accounts</h2>
         <p className="muted">
-          The first account in the list below is the primary. It takes every new run until it has used this much. Then
-          its remaining room is kept in reserve, and new runs are shared between the other accounts: more to an account
-          whose room resets sooner (so it isn't lost), to bigger plans, and to accounts with fewer runs going. An account
-          using its week faster than an even pace gets less. The primary's reserve is used only when no other account has
-          room.
+          The main account is the primary. It takes every new run until it has used this much. Then its remaining room
+          is kept in reserve, and new runs are shared between the fallback accounts: more to an account whose room resets
+          sooner (so it isn't lost), to bigger plans, and to accounts with fewer runs going. An account using its week
+          faster than an even pace gets less. Main's reserve is used only when no fallback has room.
         </p>
         <div className="row four">
           <Field label="5-hour usage (%)" htmlFor="switch_at_5h_pct">
@@ -293,16 +292,16 @@ function Accounts({ thresholds }: { thresholds: Settings }) {
         </button>
       </div>
       <p className="muted">
-        The top one is the primary; use the arrows to choose another. To add one, open the container's terminal and run <code>add-account &lt;name&gt;</code>{" "}
-        (e.g. <code>add-account third</code>), then <code>/login</code> in the Claude that opens. It appears here at the
-        bottom within a minute. Run the same command to log an account in again.
+        Main is the primary; every other account is a fallback. To add a fallback, open the container's terminal and run{" "}
+        <code>add-account &lt;name&gt;</code> (e.g. <code>add-account third</code>), then <code>/login</code> in the Claude
+        that opens. It appears here within a minute. Run the same command to log an account in again. To remove one, turn
+        it off, delete its folder (<code>rm -rf ~/accounts/&lt;name&gt;</code>) and press <strong>Remove</strong>.
       </p>
       {error && <div className="form-error">{error}</div>}
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>#</th>
               <th>Account</th>
               <th>Status</th>
               <th>5 hours</th>
@@ -313,29 +312,28 @@ function Accounts({ thresholds }: { thresholds: Settings }) {
             </tr>
           </thead>
           <tbody>
-            {list.map((a, i) => (
+            {list.map((a) => (
               <tr key={a.id} className={a.enabled ? "" : "revoked"}>
-                <td className="mono">{i + 1}</td>
                 <td>
                   <div className="task-title">{a.name}</div>
+                  <div className="sub">{a.is_main ? "Primary" : "Fallback"}</div>
                   <div className="sub mono">{a.config_dir}</div>
                 </td>
                 <td>
                   <span className={`pill ${a.state === "Ready" ? "pill-done" : a.state === "In reserve" ? "pill-queued" : a.enabled ? "pill-limited" : "pill-cancelled"}`}>
                     {a.state}
                   </span>
-                  {a.is_primary && <div className="sub">Primary</div>}
                   {a.next && <div className="sub">Next run goes here</div>}
                   {a.share_pct != null && <div className="sub">{a.share_pct}% of new runs</div>}
                   {a.limited_until && <div className="sub">Until {clock(a.limited_until)}</div>}
                   {a.login_error && <div className="sub">{a.login_error}</div>}
                 </td>
                 <td>
-                  <Usage pct={a.five_hour_pct} resetsAt={a.five_hour_resets_at} switchAt={a.is_primary ? thresholds.switch_at_5h_pct : undefined} />
+                  <Usage pct={a.five_hour_pct} resetsAt={a.five_hour_resets_at} switchAt={a.is_main ? thresholds.switch_at_5h_pct : undefined} />
                 </td>
                 <td>
                   {a.weekly_limit ? (
-                    <Usage pct={a.seven_day_pct} resetsAt={a.seven_day_resets_at} switchAt={a.is_primary ? thresholds.switch_at_weekly_pct : undefined} />
+                    <Usage pct={a.seven_day_pct} resetsAt={a.seven_day_resets_at} switchAt={a.is_main ? thresholds.switch_at_weekly_pct : undefined} />
                   ) : (
                     <span className="muted">No weekly limit</span>
                   )}
@@ -360,12 +358,6 @@ function Accounts({ thresholds }: { thresholds: Settings }) {
                 <td className="num">{a.running}</td>
                 <td className="right">
                   <span className="account-actions">
-                    <button className="secondary" disabled={busy || i === 0} title="Move up (the top one is the primary)" onClick={() => act(`/api/accounts/${a.id}/move`, "POST", { direction: "up" })}>
-                      ↑
-                    </button>
-                    <button className="secondary" disabled={busy || i === list.length - 1} title="Move down" onClick={() => act(`/api/accounts/${a.id}/move`, "POST", { direction: "down" })}>
-                      ↓
-                    </button>
                     {(a.login_error || a.limited_until) && (
                       <button className="secondary" disabled={busy} onClick={() => act(`/api/accounts/${a.id}/reset`)}>
                         Try again
@@ -561,7 +553,7 @@ function Usage({ pct, resetsAt, switchAt }: { pct: number | null; resetsAt: stri
   if (pct == null) return <span className="muted">–</span>;
   const level = pct >= 100 ? "full" : switchAt != null && pct >= switchAt ? "high" : "";
   return (
-    <div className="usage" title={switchAt != null ? `The primary shares runs out from ${switchAt}%` : undefined}>
+    <div className="usage" title={switchAt != null ? `Runs go to the fallbacks from ${switchAt}%` : undefined}>
       <div className={`meter ${level}`}>
         <span style={{ width: `${Math.min(100, pct)}%` }} />
       </div>

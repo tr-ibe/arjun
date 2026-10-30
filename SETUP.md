@@ -14,7 +14,7 @@ The Claude accounts only provide usage. Everything else a run needs belongs to A
 | mytribe CLI (mytribe's data) | `arjun@mytribe.in` | `mytribe login` in the container | `~/.mytribe` |
 | Claude accounts (usage only) | One per Claude subscription | `claude` and `add-account` in the container | `~/.claude`, `~/accounts/<name>` |
 
-Everything under `~` is the container's home folder, `/home/node`. It's the Docker volume `arjun-home` (Coolify names it `<app uuid>_arjun-home`; today that's `7adrkgbo3igmnl3pwbclp2hu_arjun-home` on apps-04). Besides the logins above, it holds the database (`~/data/arjun.db`: tasks, runs, API keys, settings, the account order), every Claude session (`~/.claude/projects`), the run folders (`~/runs`) and Arjun's copy of the mytribe plugin (`~/plugins`).
+Everything under `~` is the container's home folder, `/home/node`. It's the Docker volume `arjun-home` (Coolify names it `<app uuid>_arjun-home`; today that's `7adrkgbo3igmnl3pwbclp2hu_arjun-home` on apps-04). Besides the logins above, it holds the database (`~/data/arjun.db`: tasks, runs, API keys, settings, the accounts list), every Claude session (`~/.claude/projects`), the run folders (`~/runs`) and Arjun's copy of the mytribe plugin (`~/plugins`).
 
 So there are two ways to set Arjun up somewhere new:
 
@@ -94,7 +94,7 @@ On the **API keys** page, create one key per caller (mytribe, trigger, agent0, �
 
 ## Claude accounts
 
-The first account in the list is the primary. It takes every run until it has used 85% of its 5-hour window (or 95% of its week). Then the rest of its room is kept in reserve, and runs are shared between the other accounts: more to the ones whose room resets sooner, to bigger plans, and to ones with fewer runs going (the percentages are on the Settings page; see [Claude accounts](README.md#claude-accounts)). Arjun reads each account's plan from its login; if one is wrong, pick the right one in its **Plan** column. An account only provides usage: plugins, Slack and the mytribe CLI come from Arjun, so there's nothing else to set up per account.
+The main account is the primary; every account you add is a fallback. Main takes every run until it has used 85% of its 5-hour window (or 95% of its week). Then the rest of its room is kept in reserve, and runs are shared between the fallbacks: more to the ones whose room resets sooner, to bigger plans, and to ones with fewer runs going (the percentages are on the Settings page; see [Claude accounts](README.md#claude-accounts)). Arjun reads each account's plan from its login; if one is wrong, pick the right one in its **Plan** column. An account only provides usage: plugins, Slack and the mytribe CLI come from Arjun, so there's nothing else to set up per account.
 
 ### Adding an account
 
@@ -106,17 +106,17 @@ add-account second
 
 Use any name (letters, digits, `-` and `_`; `main` is taken). Claude opens with the new account's folder, `~/accounts/second`. In it, `/login` with the new Claude subscription, then `/exit`. `add-account` checks that the login was saved.
 
-The account appears at the bottom of Settings → Claude accounts within a minute, or straight away with **Check usage now**. Move it up or down with the arrows. A third, fourth or tenth account works the same way.
+The account appears in Settings → Claude accounts as a fallback within a minute, or straight away with **Check usage now**. A third, fourth or tenth account works the same way.
 
 ### Removing an account
 
 1. Settings → Claude accounts → **Turn off** on its row, and wait until its **Running** count is 0.
-2. In the container's terminal: `rm -rf ~/accounts/<name>`.
+2. In the container's terminal: `rm -rf ~/accounts/<name>`. This only deletes that account's login and settings; its `projects` entry is a link to the shared sessions, which stay.
 3. Press **Remove** on its row.
 
-Its past runs keep their history; they just no longer show which account they ran on. The main account can't be removed (its folder holds every session): move it down the list or turn it off instead.
+Its past runs keep their history; they just no longer show which account they ran on. The main account can't be removed (its folder holds every session): turn it off instead, and every run goes to the fallbacks.
 
-To stop using an account for a while without removing it, **Turn off** is enough. **Turn on** brings it back in the same place.
+To stop using an account for a while without removing it, **Turn off** is enough. **Turn on** brings it back.
 
 ### Logging an account in again
 
@@ -124,7 +124,7 @@ When a row says **Needs login**: run `add-account <name>` (or `claude` for main)
 
 ### Putting a different subscription behind an account
 
-To keep an account's name and place in the order but change the Claude subscription behind it:
+To keep an account's name but change the Claude subscription behind it:
 
 1. **Turn off** the account, and wait until its **Running** count is 0. A run still using the old login can renew it and write it back over the new one.
 2. In the container's terminal: `add-account <name>` (or `claude` for main), then `/logout`, `/login` with the other subscription, and `/exit`.

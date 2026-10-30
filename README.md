@@ -46,21 +46,21 @@ The Claude accounts only provide usage. Everything else a run needs comes from A
 
 ## Claude accounts
 
-Arjun can use several Claude logins. The first account in the order is the **primary**. It takes every run until it has used 85% of its 5-hour window (or 95% of its week). After that, its remaining room is kept in reserve, and new runs are shared between all the other accounts. The primary's reserve is used only when none of the others has room. Only when no account has room do runs wait, until the earliest reset. When the primary's window resets, it takes every run again. You can change both percentages on the Settings page.
+Arjun can use several Claude logins. The **main** account is the primary, and every other account is a **fallback**. Main takes every run until it has used 85% of its 5-hour window (or 95% of its week). After that, its remaining room is kept in reserve, and new runs are shared between the fallbacks. Main's reserve is used only when no fallback has room. Only when no account has room do runs wait, until the earliest reset. When main's window resets, it takes every run again. If main is turned off or needs a login, every run is shared between the fallbacks. You can change both percentages on the Settings page.
 
-Each run goes to the account with the highest score, where the score is:
+Each run goes to the fallback with the highest score, where the score is:
 
 - **The 5-hour room it has left, per hour until that window resets.** Room that resets soon is lost if it isn't used, so 60% left resetting in 30 minutes beats 80% left resetting in 4½ hours. Anything under an hour counts as an hour, so an account with a sliver left just before its reset doesn't beat a fresh one.
 - **Times its plan size**, so a Max 20x account takes about four times as much as a Max 5x one. Usage is a percentage, so without this a bigger account would be under-used. The size comes from the rate-limit tier saved with the login (Pro 1, Max 5x 5, Max 20x 20). Team and Enterprise premium seats have the Max 5x tier, and standard seats count as Pro. The **Plan** column in Settings overrides it.
-- **Times how its week is going against an even pace.** An account using its week faster than an even pace gets less, so it doesn't run out days before its weekly reset. One with plenty left near its weekly reset gets a little more (at most 1.5×). An account with no weekly limit (Enterprise, whose usage reply has only the 5-hour window) always gets the 1.5×, since none of its room is worth saving for later in the week. Settings shows **No weekly limit** for it, and as primary it shares runs out on its 5-hour usage alone.
+- **Times how its week is going against an even pace.** An account using its week faster than an even pace gets less, so it doesn't run out days before its weekly reset. One with plenty left near its weekly reset gets a little more (at most 1.5×). An account with no weekly limit (Enterprise, whose usage reply has only the 5-hour window) always gets the 1.5×, since none of its room is worth saving for later in the week. Settings shows **No weekly limit** for it, and as main it hands runs to the fallbacks on its 5-hour usage alone.
 - **Divided by one more than the runs already going on it.** Usage readings lag the runs, so without this a burst of new runs would all land on whichever account looked best a minute ago. Instead each account gets a share of the runs in proportion to its score. Settings shows each account's share while runs are being shared out.
 
 How it works:
 
-- **Before each run** the dispatcher picks the account. It uses the usage Claude reports for each account (the endpoint behind Claude Code's `/usage`). That endpoint rate-limits, so the server reads it only as often as routing needs: every 3 minutes for the accounts new runs could go to (the primary, or every account in the share once the primary is past its switch-over point) and accounts with runs on them, every 15 minutes for the rest, and again when a run ends if the last reading is over a minute old. If it answers "rate limited", that account is left alone for 5 minutes, then 10, 20 and at most 30, and its last reading is used meanwhile.
+- **Before each run** the dispatcher picks the account. It uses the usage Claude reports for each account (the endpoint behind Claude Code's `/usage`). That endpoint rate-limits, so the server reads it only as often as routing needs: every 3 minutes for the accounts new runs could go to (main, or every fallback once main is past its switch-over point) and accounts with runs on them, every 15 minutes for the rest, and again when a run ends if the last reading is over a minute old. If it answers "rate limited", that account is left alone for 5 minutes, then 10, 20 and at most 30, and its last reading is used meanwhile.
 - **If a run hits the limit anyway** (several runs started on an account that was just under the line), that account is skipped until its reset. The task continues straight away on another account, in the same Claude session and folder. A run whose login stopped working is handled the same way, and its account shows **Needs login** until someone logs it in again.
 - **The usage endpoint isn't documented.** If it can't be read, the account counts as having room, and Arjun moves on when Claude says the limit was reached.
-- **Settings → Claude accounts** shows each account's usage, which one is primary, which one the next run goes to and each account's share, its plan, and buttons to reorder accounts (the top one is the primary) or turn them off. Each attempt on a task shows which account it ran on.
+- **Settings → Claude accounts** shows each account's usage, which one the next run goes to, each fallback's share of new runs, its plan, and buttons to turn accounts off or remove them. Each attempt on a task shows which account it ran on.
 
 ### Where the accounts live
 
@@ -73,7 +73,7 @@ Each extra folder links `projects` (every session) and your instructions, agents
 
 ### Adding, removing and swapping accounts
 
-In the container's terminal, `add-account <name>`, then `/login` and `/exit`. The account joins the end of the order. [SETUP.md → Claude accounts](SETUP.md#claude-accounts) has the steps for adding, removing, logging in again and putting a different subscription behind an account.
+In the container's terminal, `add-account <name>`, then `/login` and `/exit`. The account joins as a fallback. [SETUP.md → Claude accounts](SETUP.md#claude-accounts) has the steps for adding, removing, logging in again and putting a different subscription behind an account.
 
 ## Deploy on Coolify
 

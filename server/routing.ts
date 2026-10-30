@@ -1,14 +1,17 @@
 // Which Claude account the next run goes to. Kept free of the database so it can be tested on its own.
 //
-// The first account in the order is the primary. It takes every run until it reaches the switch-over
-// point. After that its remaining room is held in reserve, and runs are spread over the other accounts
-// by how much room each has and how soon that room would reset unused (see poolScore). The primary's
-// reserve is used only when no other account has any room.
+// The main account is the primary. It takes every run until it reaches the switch-over point. After
+// that its remaining room is held in reserve, and runs are spread over the other accounts (the
+// fallbacks) by how much room each has and how soon that room would reset unused (see poolScore). The
+// primary's reserve is used only when no fallback has any room.
 
 export interface AccountState {
   id: number;
   name: string;
+  // The order accounts were added in. Only breaks ties between equal scores.
   position: number;
+  // The main account (Claude's usual folder), which is the primary.
+  is_main?: boolean;
   enabled: boolean;
   folder_exists: boolean;
   login_error: string | null;
@@ -95,13 +98,14 @@ export function poolScore(a: AccountState, nowMs: number): number {
   return (Math.max(0, fiveRate) * (a.plan_size ?? 1) * Math.max(0, pace)) / (1 + (a.running ?? 0));
 }
 
-// The primary account: the first one in the order that's turned on and logged in. A limit doesn't
-// change which account is primary, so the others aren't filled one by one while it waits.
+// The primary account: main, while it's turned on and logged in. When it isn't, there's no primary
+// and every run is shared between the fallbacks. While main waits out a limit it stays primary (and
+// is skipped), so its reserve isn't touched before the fallbacks are full.
 export function primaryAccount<T extends AccountState>(accounts: T[]): T | null {
-  return [...accounts].sort((a, b) => a.position - b.position).find(usable) ?? null;
+  return accounts.find((a) => a.is_main && usable(a)) ?? null;
 }
 
-// The accounts runs are spread over once the primary is past its switch-over point, best first.
+// The fallbacks runs are spread over once the primary is past its switch-over point, best first.
 export function rankPool<T extends AccountState>(accounts: T[], nowMs = Date.now()): T[] {
   const primary = primaryAccount(accounts);
   return accounts
