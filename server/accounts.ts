@@ -33,7 +33,10 @@ const BACKOFF_MAX_MS = 30 * 60_000;
 export const isMain = (a: { config_dir: string }) => a.config_dir === config.claudeConfigDir;
 
 export function listAccounts(): AccountRow[] {
-  return db.prepare("SELECT * FROM accounts ORDER BY position, id").all() as AccountRow[];
+  // Main first, then the fallbacks in the order they were added.
+  return db
+    .prepare("SELECT * FROM accounts ORDER BY config_dir = ? DESC, position, id")
+    .all(config.claudeConfigDir) as AccountRow[];
 }
 
 export function getAccount(id: number): AccountRow | undefined {
@@ -91,6 +94,7 @@ function accountStates(): Account[] {
   return listAccounts().map((a) => ({
     ...a,
     enabled: !!a.enabled,
+    is_main: isMain(a),
     folder_exists: isMain(a) || existsSync(a.config_dir),
     plan_size: planSize(a),
     plan_size_set: a.plan_size,
@@ -262,7 +266,6 @@ export function accountViews() {
       id: a.id,
       name: a.name,
       config_dir: a.config_dir,
-      position: a.position,
       enabled: a.enabled,
       is_main: isMain(a),
       is_primary: isPrimary,
@@ -292,21 +295,6 @@ function mustGet(id: number): AccountRow {
   const a = getAccount(id);
   if (!a) throw new ValidationError("Account not found.");
   return a;
-}
-
-// Swaps an account with its neighbour, so the order is easy to change one step at a time.
-export function moveAccount(id: number, direction: "up" | "down"): void {
-  const list = listAccounts();
-  const i = list.findIndex((a) => a.id === id);
-  if (i < 0) throw new ValidationError("Account not found.");
-  const j = direction === "up" ? i - 1 : i + 1;
-  if (j < 0 || j >= list.length) return;
-  db.transaction(() => {
-    // Renumber 1..n first, so equal positions can't make the swap a no-op.
-    list.forEach((a, k) => updateAccount(a.id, { position: k + 1 }));
-    updateAccount(list[i].id, { position: j + 1 });
-    updateAccount(list[j].id, { position: i + 1 });
-  })();
 }
 
 export function setAccountEnabled(id: number, enabled: boolean): void {

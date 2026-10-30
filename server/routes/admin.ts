@@ -3,7 +3,6 @@ import {
   accountViews,
   checkAllAccounts,
   forgetAccount,
-  moveAccount,
   resetAccount,
   setAccountEnabled,
   setAccountPlanSize,
@@ -101,8 +100,8 @@ export async function metaRoutes(app: FastifyInstance) {
   });
 }
 
-// The Claude accounts runs go to: the first is the primary, the rest share runs once it's past its
-// switch-over point. They're added with the add-account command in the container.
+// The Claude accounts runs go to: main is the primary, and the rest are fallbacks that share runs once
+// it's past its switch-over point. They're added with the add-account command in the container.
 export async function accountRoutes(app: FastifyInstance) {
   const id = (req: { params: unknown }) => Number((req.params as { id: string }).id);
 
@@ -111,14 +110,6 @@ export async function accountRoutes(app: FastifyInstance) {
   // Looks for new account folders and reads every account's usage now.
   app.post("/api/accounts/check", async () => {
     await checkAllAccounts({ force: true });
-    kick();
-    return accountViews();
-  });
-
-  app.post("/api/accounts/:id/move", async (req) => {
-    const { direction } = (req.body ?? {}) as { direction?: unknown };
-    if (direction !== "up" && direction !== "down") throw new ValidationError("direction must be up or down.");
-    moveAccount(id(req), direction);
     kick();
     return accountViews();
   });
