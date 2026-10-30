@@ -94,16 +94,25 @@ export interface Account {
   position: number;
   enabled: boolean;
   is_main: boolean;
+  is_primary: boolean;
   folder_exists: boolean;
   state: string;
   next: boolean;
+  // The share of new runs it gets while runs are being shared out, or null when it isn't in the share.
+  share_pct: number | null;
   running: number;
+  plan_tier: string | null;
+  plan_size: number;
+  plan_size_set: number | null;
+  plan_size_auto: number;
   limited_until: string | null;
   login_error: string | null;
   five_hour_pct: number | null;
   five_hour_resets_at: string | null;
   seven_day_pct: number | null;
   seven_day_resets_at: string | null;
+  // False when the plan has only the 5-hour limit (Enterprise).
+  weekly_limit: boolean;
   usage_checked_at: string | null;
   usage_error: string | null;
 }

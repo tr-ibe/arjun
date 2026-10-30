@@ -67,6 +67,8 @@ export interface StoredLogin {
   accessToken: string;
   expiresAt: number | null;
   scopes: string[] | null;
+  // E.g. "default_claude_max_5x". Says how big the plan is.
+  rateLimitTier: string | null;
 }
 
 export function readLogin(dir: string): StoredLogin | null {
@@ -78,6 +80,7 @@ export function readLogin(dir: string): StoredLogin | null {
       accessToken: oauth.accessToken,
       expiresAt: typeof oauth.expiresAt === "number" ? oauth.expiresAt : null,
       scopes: Array.isArray(oauth.scopes) ? oauth.scopes : null,
+      rateLimitTier: typeof oauth.rateLimitTier === "string" ? oauth.rateLimitTier : null,
     };
   } catch {
     return null;

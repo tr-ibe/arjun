@@ -63,6 +63,9 @@ export interface AccountRow {
   seven_day_resets_at: string | null;
   usage_checked_at: string | null;
   usage_error: string | null;
+  // The rate-limit tier saved with the login, and a plan size set in Settings over the one it implies.
+  plan_tier: string | null;
+  plan_size: number | null;
   created_at: string;
 }
 
@@ -179,6 +182,9 @@ db.exec(`
 // Columns added after the first release.
 const runColumns = (db.prepare("PRAGMA table_info(runs)").all() as { name: string }[]).map((c) => c.name);
 if (!runColumns.includes("account_id")) db.exec("ALTER TABLE runs ADD COLUMN account_id INTEGER REFERENCES accounts(id)");
+const accountColumns = (db.prepare("PRAGMA table_info(accounts)").all() as { name: string }[]).map((c) => c.name);
+if (!accountColumns.includes("plan_tier")) db.exec("ALTER TABLE accounts ADD COLUMN plan_tier TEXT");
+if (!accountColumns.includes("plan_size")) db.exec("ALTER TABLE accounts ADD COLUMN plan_size REAL");
 
 export const now = () => new Date().toISOString();
 

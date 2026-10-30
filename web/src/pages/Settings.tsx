@@ -94,10 +94,13 @@ export function SettingsPage() {
           />
         </Field>
 
-        <h2>Switching accounts</h2>
+        <h2>Sharing runs between accounts</h2>
         <p className="muted">
-          New runs go to the first account in the list below until it has used this much, then to the next one, and so
-          on. When every account is past these points, the first one with any room left is used.
+          The first account in the list below is the primary. It takes every new run until it has used this much. Then
+          its remaining room is kept in reserve, and new runs are shared between the other accounts: more to an account
+          whose room resets sooner (so it isn't lost), to bigger plans, and to accounts with fewer runs going. An account
+          using its week faster than an even pace gets less. The primary's reserve is used only when no other account has
+          room.
         </p>
         <div className="row four">
           <Field label="5-hour usage (%)" htmlFor="switch_at_5h_pct">
@@ -290,7 +293,7 @@ function Accounts({ thresholds }: { thresholds: Settings }) {
         </button>
       </div>
       <p className="muted">
-        Tried from the top. To add one, open the container's terminal and run <code>add-account &lt;name&gt;</code>{" "}
+        The top one is the primary; use the arrows to choose another. To add one, open the container's terminal and run <code>add-account &lt;name&gt;</code>{" "}
         (e.g. <code>add-account third</code>), then <code>/login</code> in the Claude that opens. It appears here at the
         bottom within a minute. Run the same command to log an account in again.
       </p>
@@ -304,6 +307,7 @@ function Accounts({ thresholds }: { thresholds: Settings }) {
               <th>Status</th>
               <th>5 hours</th>
               <th>Week</th>
+              <th>Plan</th>
               <th className="num">Running</th>
               <th></th>
             </tr>
@@ -317,26 +321,49 @@ function Accounts({ thresholds }: { thresholds: Settings }) {
                   <div className="sub mono">{a.config_dir}</div>
                 </td>
                 <td>
-                  <span className={`pill ${a.state === "Ready" ? "pill-done" : a.enabled ? "pill-limited" : "pill-cancelled"}`}>
+                  <span className={`pill ${a.state === "Ready" ? "pill-done" : a.state === "In reserve" ? "pill-queued" : a.enabled ? "pill-limited" : "pill-cancelled"}`}>
                     {a.state}
                   </span>
-                  {a.next && <div className="sub">New runs go here</div>}
+                  {a.is_primary && <div className="sub">Primary</div>}
+                  {a.next && <div className="sub">Next run goes here</div>}
+                  {a.share_pct != null && <div className="sub">{a.share_pct}% of new runs</div>}
                   {a.limited_until && <div className="sub">Until {clock(a.limited_until)}</div>}
                   {a.login_error && <div className="sub">{a.login_error}</div>}
                 </td>
                 <td>
-                  <Usage pct={a.five_hour_pct} resetsAt={a.five_hour_resets_at} switchAt={thresholds.switch_at_5h_pct} />
+                  <Usage pct={a.five_hour_pct} resetsAt={a.five_hour_resets_at} switchAt={a.is_primary ? thresholds.switch_at_5h_pct : undefined} />
                 </td>
                 <td>
-                  <Usage pct={a.seven_day_pct} resetsAt={a.seven_day_resets_at} switchAt={thresholds.switch_at_weekly_pct} />
+                  {a.weekly_limit ? (
+                    <Usage pct={a.seven_day_pct} resetsAt={a.seven_day_resets_at} switchAt={a.is_primary ? thresholds.switch_at_weekly_pct : undefined} />
+                  ) : (
+                    <span className="muted">No weekly limit</span>
+                  )}
+                </td>
+                <td>
+                  <select
+                    aria-label={`Plan of ${a.name}`}
+                    disabled={busy}
+                    value={a.plan_size_set == null ? "" : String(a.plan_size_set)}
+                    onChange={(e) =>
+                      act(`/api/accounts/${a.id}`, "PATCH", { plan_size: e.target.value === "" ? null : Number(e.target.value) })
+                    }
+                  >
+                    <option value="">Auto ({planLabel(a.plan_size_auto)})</option>
+                    {PLANS.map((p) => (
+                      <option key={p.size} value={p.size}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
                 </td>
                 <td className="num">{a.running}</td>
                 <td className="right">
                   <span className="account-actions">
-                    <button className="secondary" disabled={busy || i === 0} title="Try earlier" onClick={() => act(`/api/accounts/${a.id}/move`, "POST", { direction: "up" })}>
+                    <button className="secondary" disabled={busy || i === 0} title="Move up (the top one is the primary)" onClick={() => act(`/api/accounts/${a.id}/move`, "POST", { direction: "up" })}>
                       ↑
                     </button>
-                    <button className="secondary" disabled={busy || i === list.length - 1} title="Try later" onClick={() => act(`/api/accounts/${a.id}/move`, "POST", { direction: "down" })}>
+                    <button className="secondary" disabled={busy || i === list.length - 1} title="Move down" onClick={() => act(`/api/accounts/${a.id}/move`, "POST", { direction: "down" })}>
                       ↓
                     </button>
                     {(a.login_error || a.limited_until) && (
@@ -367,7 +394,7 @@ function Accounts({ thresholds }: { thresholds: Settings }) {
             .filter((a) => a.usage_error)
             .map((a) => `${a.name}: ${a.usage_error}`)
             .join(" ")}{" "}
-          Without a reading, an account is used until Claude says its limit is reached.
+          Without a reading, an account counts as having room until Claude says its limit is reached.
         </p>
       )}
       {list[0]?.usage_checked_at && <p className="hint">Usage checked {timeAgo(list[0].usage_checked_at)}.</p>}
@@ -519,11 +546,22 @@ function ArjunTools() {
   );
 }
 
-function Usage({ pct, resetsAt, switchAt }: { pct: number | null; resetsAt: string | null; switchAt: number }) {
+// Plan sizes, as multiples of Pro. A bigger plan takes a bigger share of the runs.
+const PLANS = [
+  { size: 1, label: "Pro" },
+  { size: 5, label: "Max 5x" },
+  { size: 20, label: "Max 20x" },
+];
+
+function planLabel(size: number): string {
+  return PLANS.find((p) => p.size === size)?.label ?? `${size}× Pro`;
+}
+
+function Usage({ pct, resetsAt, switchAt }: { pct: number | null; resetsAt: string | null; switchAt?: number }) {
   if (pct == null) return <span className="muted">–</span>;
-  const level = pct >= 100 ? "full" : pct >= switchAt ? "high" : "";
+  const level = pct >= 100 ? "full" : switchAt != null && pct >= switchAt ? "high" : "";
   return (
-    <div className="usage" title={`Switches to the next account at ${switchAt}%`}>
+    <div className="usage" title={switchAt != null ? `The primary shares runs out from ${switchAt}%` : undefined}>
       <div className={`meter ${level}`}>
         <span style={{ width: `${Math.min(100, pct)}%` }} />
       </div>
