@@ -6,6 +6,7 @@ import {
   moveAccount,
   resetAccount,
   setAccountEnabled,
+  setAccountPlanSize,
 } from "../accounts.js";
 import { sendTestAlert } from "../alerts.js";
 import { checkLogin, clearSessionCookie, createApiKey, listApiKeys, revokeApiKey, setSessionCookie } from "../auth.js";
@@ -100,7 +101,8 @@ export async function metaRoutes(app: FastifyInstance) {
   });
 }
 
-// The Claude accounts runs go to, in order. They're added with the add-account command in the container.
+// The Claude accounts runs go to: the first is the primary, the rest share runs once it's past its
+// switch-over point. They're added with the add-account command in the container.
 export async function accountRoutes(app: FastifyInstance) {
   const id = (req: { params: unknown }) => Number((req.params as { id: string }).id);
 
@@ -121,10 +123,20 @@ export async function accountRoutes(app: FastifyInstance) {
     return accountViews();
   });
 
+  // Either field, or both. plan_size null goes back to the size the login's plan implies.
   app.patch("/api/accounts/:id", async (req) => {
-    const { enabled } = (req.body ?? {}) as { enabled?: unknown };
-    if (typeof enabled !== "boolean") throw new ValidationError("enabled must be true or false.");
-    setAccountEnabled(id(req), enabled);
+    const body = (req.body ?? {}) as { enabled?: unknown; plan_size?: unknown };
+    if (body.enabled === undefined && body.plan_size === undefined) throw new ValidationError("Nothing to change.");
+    if (body.enabled !== undefined && typeof body.enabled !== "boolean") throw new ValidationError("enabled must be true or false.");
+    if (
+      body.plan_size !== undefined &&
+      body.plan_size !== null &&
+      (typeof body.plan_size !== "number" || !(body.plan_size > 0 && body.plan_size <= 100))
+    ) {
+      throw new ValidationError("plan_size must be a number from 0 to 100, or null.");
+    }
+    if (typeof body.enabled === "boolean") setAccountEnabled(id(req), body.enabled);
+    if (body.plan_size !== undefined) setAccountPlanSize(id(req), body.plan_size as number | null);
     kick();
     return accountViews();
   });

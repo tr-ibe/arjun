@@ -4,7 +4,19 @@ import { join } from "node:path";
 import { prepareAccountDir, readLogin } from "./account_dir.js";
 import { config } from "./config.js";
 import { db, now, type AccountRow } from "./db.js";
-import { chooseAccount, currentPct, nextFreeAt, parseUsage, type AccountState } from "./routing.js";
+import {
+  chooseAccount,
+  currentPct,
+  nextFreeAt,
+  hasWeeklyLimit,
+  parseUsage,
+  planSizeFromTier,
+  poolScore,
+  primaryAccount,
+  primaryUnderSwitchOver,
+  rankPool,
+  type AccountState,
+} from "./routing.js";
 import { getSettings, ValidationError } from "./settings.js";
 
 const CHECK_EVERY_MS = 60_000;
@@ -60,21 +72,40 @@ export function syncAccounts(): void {
   }
 }
 
-type Account = Omit<AccountRow, "enabled"> & AccountState;
+// plan_size is the size in use; plan_size_set is the one set in Settings, if any.
+type Account = Omit<AccountRow, "enabled" | "plan_size"> & AccountState & { plan_size: number; plan_size_set: number | null };
+
+// The plan size set in Settings, else the one the login's tier implies, else Pro's.
+const planSize = (a: AccountRow) => a.plan_size ?? planSizeFromTier(a.plan_tier) ?? 1;
+
+function runningByAccount(): Map<number | null, number> {
+  const rows = db
+    .prepare("SELECT account_id, COUNT(*) AS n FROM runs WHERE status = 'running' GROUP BY account_id")
+    .all() as { account_id: number | null; n: number }[];
+  return new Map(rows.map((r) => [r.account_id, r.n]));
+}
 
 // Claude makes the main folder itself on first run; an extra account's folder holds its login.
-function toState(a: AccountRow): Account {
-  return { ...a, enabled: !!a.enabled, folder_exists: isMain(a) || existsSync(a.config_dir) };
+function accountStates(): Account[] {
+  const running = runningByAccount();
+  return listAccounts().map((a) => ({
+    ...a,
+    enabled: !!a.enabled,
+    folder_exists: isMain(a) || existsSync(a.config_dir),
+    plan_size: planSize(a),
+    plan_size_set: a.plan_size,
+    running: running.get(a.id) ?? 0,
+  }));
 }
 
 // The account the next run should use, or null when none can take one.
 export function pickAccount(): Account | null {
-  return chooseAccount(listAccounts().map(toState), getSettings());
+  return chooseAccount(accountStates(), getSettings());
 }
 
 // Why nothing can start, when no account can take a run.
 export function accountsBlocked(): { until: string | null; reason: string } | null {
-  const states = listAccounts().map(toState);
+  const states = accountStates();
   if (chooseAccount(states, getSettings())) return null;
   const until = nextFreeAt(states);
   return until
@@ -108,13 +139,14 @@ const checkedWithin = (a: AccountRow, ms: number) => !!a.usage_checked_at && Dat
 
 async function checkUsage(a: AccountRow): Promise<void> {
   const fields: Partial<AccountRow> = { usage_checked_at: now() };
+  const login = readLogin(a.config_dir);
+  if (login?.rateLimitTier) fields.plan_tier = login.rateLimitTier;
   // Logging in again clears a login problem.
   if (a.login_error && a.login_error_at && loginChangedSince(a.config_dir, a.login_error_at)) {
     fields.login_error = null;
     fields.login_error_at = null;
   }
 
-  const login = readLogin(a.config_dir);
   if (!login) {
     if (isMain(a)) {
       fields.usage_error = "No saved login to read usage with.";
@@ -166,11 +198,18 @@ export async function checkAllAccounts({ force = false } = {}): Promise<void> {
       (r) => r.account_id,
     ),
   );
-  const next = busy ? pickAccount()?.id : undefined;
+  // The accounts the next runs could go to: the primary, or every account in the pool once the primary
+  // is past its switch-over point, since the pool is weighed on all their readings.
+  const candidates = new Set<number>();
+  if (busy) {
+    const next = pickAccount();
+    if (next) candidates.add(next.id);
+    if (next && next.id !== primaryAccount(accountStates())?.id) for (const a of rankPool(accountStates())) candidates.add(a.id);
+  }
   const due = (a: AccountRow) => {
     if (backedOff(a.id)) return false;
     if (force) return true;
-    const active = running.has(a.id) || a.id === next;
+    const active = running.has(a.id) || candidates.has(a.id);
     return !checkedWithin(a, active ? ACTIVE_CHECK_EVERY_MS : IDLE_CHECK_EVERY_MS);
   };
   await Promise.all(listAccounts().filter((a) => a.enabled && due(a)).map(checkUsage));
@@ -198,26 +237,26 @@ export function startAccountChecks(log: FastifyBaseLogger, onChecked: () => void
 
 export function accountViews() {
   const s = getSettings();
-  const states = listAccounts().map(toState);
-  const next = chooseAccount(states, s);
-  const running = new Map(
-    (
-      db.prepare("SELECT account_id, COUNT(*) AS n FROM runs WHERE status = 'running' GROUP BY account_id").all() as {
-        account_id: number | null;
-        n: number;
-      }[]
-    ).map((r) => [r.account_id, r.n]),
-  );
+  const states = accountStates();
   const nowMs = Date.now();
+  const next = chooseAccount(states, s, nowMs);
+  const primary = primaryAccount(states);
+  // While the pool is taking runs, each pool account's share of them, in proportion to its score.
+  const sharing = !!next && next.id !== primary?.id;
+  const pool = sharing ? rankPool(states, nowMs) : [];
+  const scores = new Map(pool.map((a) => [a.id, poolScore(a, nowMs)]));
+  const total = [...scores.values()].reduce((sum, v) => sum + v, 0);
   return states.map((a) => {
     const fiveHour = currentPct(a.five_hour_pct, a.five_hour_resets_at, nowMs);
     const weekly = currentPct(a.seven_day_pct, a.seven_day_resets_at, nowMs);
+    const isPrimary = primary?.id === a.id;
     let state: string;
     if (!a.enabled) state = "Turned off";
     else if (!a.folder_exists) state = "Folder missing";
     else if (a.login_error) state = "Needs login";
     else if (a.limited_until && Date.parse(a.limited_until) > nowMs) state = "Limit reached";
-    else if (fiveHour >= s.switch_at_5h_pct || weekly >= s.switch_at_weekly_pct) state = "Past switch-over";
+    else if (fiveHour >= 100 || weekly >= 100) state = "Full";
+    else if (isPrimary && !primaryUnderSwitchOver(a, s, nowMs)) state = "In reserve";
     else state = "Ready";
     return {
       id: a.id,
@@ -226,15 +265,22 @@ export function accountViews() {
       position: a.position,
       enabled: a.enabled,
       is_main: isMain(a),
+      is_primary: isPrimary,
       folder_exists: a.folder_exists,
       state,
       next: next?.id === a.id,
-      running: running.get(a.id) ?? 0,
+      share_pct: total > 0 && scores.has(a.id) ? Math.round((scores.get(a.id)! / total) * 100) : null,
+      running: a.running ?? 0,
+      plan_tier: a.plan_tier,
+      plan_size: a.plan_size,
+      plan_size_set: a.plan_size_set,
+      plan_size_auto: planSizeFromTier(a.plan_tier) ?? 1,
       limited_until: a.limited_until && Date.parse(a.limited_until) > nowMs ? a.limited_until : null,
       login_error: a.login_error,
       five_hour_pct: a.five_hour_pct == null ? null : fiveHour,
       five_hour_resets_at: a.five_hour_resets_at,
       seven_day_pct: a.seven_day_pct == null ? null : weekly,
+      weekly_limit: hasWeeklyLimit(a),
       seven_day_resets_at: a.seven_day_resets_at,
       usage_checked_at: a.usage_checked_at,
       usage_error: a.usage_error,
@@ -266,6 +312,12 @@ export function moveAccount(id: number, direction: "up" | "down"): void {
 export function setAccountEnabled(id: number, enabled: boolean): void {
   mustGet(id);
   updateAccount(id, { enabled: enabled ? 1 : 0 });
+}
+
+// null goes back to the size the login's tier implies.
+export function setAccountPlanSize(id: number, size: number | null): void {
+  mustGet(id);
+  updateAccount(id, { plan_size: size });
 }
 
 // For "try again" after fixing a login, and to clear a limit that was read wrongly.

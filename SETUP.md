@@ -94,7 +94,7 @@ On the **API keys** page, create one key per caller (mytribe, trigger, agent0, â
 
 ## Claude accounts
 
-Runs go to the first account in the list until it has used 85% of its 5-hour window (or 95% of its week), then to the next, and so on (the percentages are on the Settings page). An account only provides usage: plugins, Slack and the mytribe CLI come from Arjun, so there's nothing else to set up per account.
+The first account in the list is the primary. It takes every run until it has used 85% of its 5-hour window (or 95% of its week). Then the rest of its room is kept in reserve, and runs are shared between the other accounts: more to the ones whose room resets sooner, to bigger plans, and to ones with fewer runs going (the percentages are on the Settings page; see [Claude accounts](README.md#claude-accounts)). Arjun reads each account's plan from its login; if one is wrong, pick the right one in its **Plan** column. An account only provides usage: plugins, Slack and the mytribe CLI come from Arjun, so there's nothing else to set up per account.
 
 ### Adding an account
 
