@@ -25,6 +25,8 @@ export interface Settings {
   alert_pause_every_min: number;
   // Say when no Claude account can take a run, and again when one can.
   alert_no_accounts: boolean;
+  // Say when a Claude account needs logging in again, and again once it works.
+  alert_account_repair: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -41,6 +43,7 @@ const DEFAULTS: Settings = {
   alert_pause_after_min: 10,
   alert_pause_every_min: 10,
   alert_no_accounts: true,
+  alert_account_repair: true,
 };
 
 export class ValidationError extends Error {}
@@ -113,6 +116,7 @@ const validators: { [K in keyof Settings]: (v: unknown) => Settings[K] } = {
   alert_pause_after_min: (v) => checkInt("alert_pause_after_min", v, 0, 24 * 60),
   alert_pause_every_min: (v) => checkInt("alert_pause_every_min", v, 0, 24 * 60),
   alert_no_accounts: (v) => checkBool("alert_no_accounts", v),
+  alert_account_repair: (v) => checkBool("alert_account_repair", v),
 };
 
 export function getSettings(): Settings {

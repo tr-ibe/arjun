@@ -85,6 +85,7 @@ export interface Settings {
   alert_pause_after_min: number;
   alert_pause_every_min: number;
   alert_no_accounts: boolean;
+  alert_account_repair: boolean;
 }
 
 export interface Account {
@@ -107,6 +108,8 @@ export interface Account {
   limited_until: string | null;
   login_error: string | null;
   five_hour_pct: number | null;
+  // False when the plan has only the weekly limit (verified Ultra).
+  five_hour_limit: boolean;
   five_hour_resets_at: string | null;
   seven_day_pct: number | null;
   seven_day_resets_at: string | null;

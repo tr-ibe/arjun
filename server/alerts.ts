@@ -1,10 +1,11 @@
-import { accountsBlocked } from "./accounts.js";
+import { accountsBlocked, accountsNeedingRepair, getAccount } from "./accounts.js";
 import { config } from "./config.js";
 import { db, getRun, getTask, type RunRow } from "./db.js";
 import { getSettings, getState, queuePausedSince, setState, type Settings } from "./settings.js";
 
 // Slack alerts, posted as Arjun with SLACK_USER_TOKEN to the channel set on the Settings page:
-// a run that ends needing a person, a queue left paused, and no Claude account able to take runs.
+// a run that ends needing a person, a queue left paused, no Claude account able to take runs, and a
+// Claude account that needs logging in again.
 
 // No account counts as blocked until it has been for this many checks in a row, so a usage
 // reading that crosses a threshold for a moment doesn't alert.
@@ -138,19 +139,48 @@ let blockedChecks = 0;
 function checkAccounts(s: Settings): void {
   const blocked = accountsBlocked();
   blockedChecks = blocked ? blockedChecks + 1 : 0;
-  const alerted = getState<boolean>("alert_no_accounts") === true;
+  // Not "alert_no_accounts": state shares the settings table, and that key is the setting itself.
+  const alerted = getState<boolean>("alert_no_accounts_sent") === true;
   if (!s.alert_no_accounts) {
-    if (alerted) setState("alert_no_accounts", false);
+    if (alerted) setState("alert_no_accounts_sent", false);
     return;
   }
   if (blocked && !alerted && blockedChecks >= BLOCKED_CHECKS) {
-    setState("alert_no_accounts", true);
+    setState("alert_no_accounts_sent", true);
     const until = blocked.until ? ` The first one frees up ${slackTime(blocked.until)}.` : "";
     send(`No Claude account can take runs. ${blocked.reason}${until} ${waiting(queuedCount())}${consoleLink(s, "/settings")}`);
   } else if (!blocked && alerted) {
-    setState("alert_no_accounts", false);
+    setState("alert_no_accounts_sent", false);
     send("A Claude account can take runs again, so the queue is moving.");
   }
+}
+
+// Once per account that needs repair, and once more when it works again. An account turned off or
+// removed meanwhile just drops out, since nobody fixed it.
+function checkRepairs(s: Settings): void {
+  const alerted = getState<Record<string, string>>("alert_account_repair_sent") ?? {};
+  if (!s.alert_account_repair) {
+    if (Object.keys(alerted).length) setState("alert_account_repair_sent", null);
+    return;
+  }
+  const broken = accountsNeedingRepair();
+  const next: Record<string, string> = {};
+  for (const a of broken) {
+    next[a.id] = a.name;
+    if (alerted[a.id]) continue;
+    send(
+      [
+        `Claude account *${esc(a.name)}* needs repair, so no runs go to it.`,
+        quote(a.problem, 300),
+        `To fix it, open the container's terminal, run \`${a.fix}\`, then \`/login\` and \`/exit\`.${consoleLink(s, "/settings")}`,
+      ].join("\n"),
+    );
+  }
+  for (const [id, name] of Object.entries(alerted)) {
+    if (next[id]) continue;
+    if (getAccount(Number(id))?.enabled) send(`Claude account *${esc(name)}* works again.`);
+  }
+  if (JSON.stringify(next) !== JSON.stringify(alerted)) setState("alert_account_repair_sent", next);
 }
 
 export function checkAlerts(): void {
@@ -158,6 +188,7 @@ export function checkAlerts(): void {
   if (!canAlert(s)) return;
   checkPause(s);
   checkAccounts(s);
+  checkRepairs(s);
 }
 
 export function startAlerts(logger: typeof log): void {

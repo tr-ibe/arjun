@@ -32,14 +32,14 @@ const setUsage = (name, fiveHour, resetsInHours = 3, { weekly = true } = {}) => 
   if (weekly) usage[name].seven_day = { utilization: 10, resets_at: LATER };
 };
 
-function login(dir, name) {
+function login(dir, name, { expiresAt = Date.now() + 86400_000 } = {}) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, ".credentials.json"),
     JSON.stringify({
       claudeAiOauth: {
         accessToken: `tok-${name}`,
-        expiresAt: Date.now() + 86400_000,
+        expiresAt,
         scopes: ["user:inference", "user:profile"],
         rateLimitTier: "default_claude_max_5x",
       },
@@ -302,4 +302,25 @@ test("when the usage endpoint rate-limits, the account is left alone for a while
   second = byName(await check(), "second"); // even Check usage now waits
   assert.equal(hits.second, before);
   rateLimited.delete("second");
+});
+
+// After the test above, second is left alone for a while, so this uses third.
+test("an expired login is renewed with a tiny run, and its usage read again", async () => {
+  const dir = join(accountsDir, "third");
+  login(dir, "third", { expiresAt: Date.now() - 60_000 });
+  setUsage("third", 42);
+  await check();
+  const start = Date.now();
+  let third;
+  while (Date.now() - start < 10_000) {
+    third = byName((await call("GET", "/api/accounts")).data, "third");
+    if (third.five_hour_pct === 42) break;
+    await sleep(100);
+  }
+  assert.equal(third.five_hour_pct, 42);
+  assert.equal(third.usage_error, null);
+  assert.equal(third.state, "Ready");
+  const renewals = readFileSync(join(dir, "renewals.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(renewals.length, 1);
+  assert.deepEqual(renewals[0].slice(0, 4), ["-p", "Reply with the single word OK.", "--model", "haiku"]);
 });

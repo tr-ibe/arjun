@@ -20,8 +20,8 @@ export interface AccountState {
   five_hour_resets_at: string | null;
   seven_day_pct: number | null;
   seven_day_resets_at: string | null;
-  // How big the plan is, as a multiple of Pro (Max 5x is 5). Usage is a percentage, so this is what
-  // lets a bigger account take a bigger share.
+  // How big the plan is, as a multiple of Pro's weekly usage (Max is 5, Ultra 10). Usage is a
+  // percentage, so this is what lets a bigger account take a bigger share.
   plan_size?: number;
   // Runs going on the account now. Its usage reading doesn't show what they'll still use.
   running?: number;
@@ -67,6 +67,12 @@ export function hasWeeklyLimit(a: AccountState): boolean {
   return !(a.five_hour_pct != null && a.seven_day_pct == null);
 }
 
+// The other way round: verified Ultra accounts have only the weekly limit, and their reply has no
+// 5-hour window.
+export function hasFiveHourLimit(a: AccountState): boolean {
+  return !(a.seven_day_pct != null && a.five_hour_pct == null);
+}
+
 // Hours until a window resets, or `fresh` when no window is running (the next run starts one).
 function hoursLeft(resetsAt: string | null, nowMs: number, fresh: number): number {
   const at = resetsAt ? Date.parse(resetsAt) : NaN;
@@ -78,7 +84,9 @@ function hoursLeft(resetsAt: string | null, nowMs: number, fresh: number): numbe
 // - The 5-hour room it has left, per hour until that room resets: room that resets soon is lost if
 //   it isn't used, so 60% left with 30 minutes to go beats 80% left with 4½ hours. Anything under an
 //   hour counts as an hour, so an account about to reset with a sliver left doesn't win on the sliver.
-// - Times the plan size, so a Max 20x account takes about four times what a Max 5x one does.
+//   An account with no 5-hour limit counts as having a fresh window, so only its week holds it back.
+// - Times the plan size, so an Ultra account takes about twice what a Max one does: its week is 10×
+//   Pro's against Max's 5×.
 // - Times how its week is going against an even pace: an account using its week faster than that is
 //   slowed down so it doesn't run out days before the weekly reset, and one with plenty left near its
 //   reset gets a little more (at most 1.5×). An account with no weekly limit gets the most: none of
@@ -132,9 +140,14 @@ export function chooseAccount<T extends AccountState>(accounts: T[], t: Threshol
 }
 
 // Plan size from the rate-limit tier Claude Code saves with the login, e.g. "default_claude_max_5x".
-// Team and Enterprise premium seats have the Max 5x tier too; standard seats count as Pro.
+// Team and Enterprise premium seats have the Max tier too; standard seats count as Pro.
+//
+// On 30 Oct 2026 Max 5x was renamed Max and Max 20x became Ultra. The "20x" was only ever its 5-hour
+// window; its week is 10× Pro's, and verified Ultra accounts no longer have a 5-hour limit at all, so
+// the week is what bounds it and it counts as 10. Older logins still say max_20x.
 export function planSizeFromTier(tier: string | null | undefined): number | null {
   if (!tier) return null;
+  if (/ultra|max_20x/i.test(tier)) return 10;
   const max = /max_(\d+)x/i.exec(tier);
   if (max) return Number(max[1]);
   return /max/i.test(tier) ? 5 : 1;

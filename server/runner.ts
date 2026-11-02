@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { checkAccount, markLimited, markLoginFailed } from "./accounts.js";
 import { alertRunEnded } from "./alerts.js";
-import { config } from "./config.js";
+import { config, SECRET_ENV } from "./config.js";
 import { db, getRun, getTask, insertRun, now, updateRun, type RunRow } from "./db.js";
 import { detectUsageLimit } from "./limit.js";
 import { continuePrompt, firstPrompt, LOGIN_FAILED_MESSAGE, RESTART_MESSAGE, USAGE_LIMIT_MESSAGE } from "./prompt.js";
@@ -14,8 +14,6 @@ import { runTools } from "./tools.js";
 
 const TAIL_CHARS = 16_000;
 const KILL_GRACE_MS = 5_000;
-// Environment variables Claude must never see.
-const SECRET_ENV = ["AUTH_USERNAME", "AUTH_PASSWORD", "SESSION_SECRET", "SLACK_USER_TOKEN", "SLACK_APP_TOKEN"];
 
 class Tail {
   private buf = "";

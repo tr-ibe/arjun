@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chooseAccount, detectLoginFailure, nextFreeAt, parseUsage, hasWeeklyLimit, planSizeFromTier, poolScore } from "../dist/server/routing.js";
+import { chooseAccount, detectLoginFailure, nextFreeAt, parseUsage, hasFiveHourLimit, hasWeeklyLimit, planSizeFromTier, poolScore } from "../dist/server/routing.js";
 
 const NOW = Date.parse("2026-10-27T10:00:00Z");
 const inHours = (h) => new Date(NOW + h * 3600_000).toISOString();
@@ -141,9 +141,26 @@ test("unknown usage counts as room", () => {
 
 test("reads the plan size from the login's rate-limit tier", () => {
   assert.equal(planSizeFromTier("default_claude_max_5x"), 5);
-  assert.equal(planSizeFromTier("default_claude_max_20x"), 20);
+  // Max 20x is now Ultra, whose week is 10× Pro's.
+  assert.equal(planSizeFromTier("default_claude_max_20x"), 10);
+  assert.equal(planSizeFromTier("default_claude_ultra"), 10);
+  assert.equal(planSizeFromTier("default_claude_max"), 5);
   assert.equal(planSizeFromTier("default_claude_ai"), 1);
   assert.equal(planSizeFromTier(null), null);
+});
+
+test("an Ultra account with no 5-hour limit is weighed on its week, at about twice a Max account", () => {
+  const ultra = account(2, { seven_day_pct: 0, seven_day_resets_at: inHours(168), plan_size: 10 });
+  const max = account(3, { five_hour_pct: 0, five_hour_resets_at: inHours(5), seven_day_pct: 0, seven_day_resets_at: inHours(168), plan_size: 5 });
+  assert.equal(hasFiveHourLimit(ultra), false);
+  assert.equal(hasWeeklyLimit(ultra), true);
+  assert.equal(hasFiveHourLimit(max), true);
+  // No reading yet: assume both limits.
+  assert.equal(hasFiveHourLimit(account(4)), true);
+  assert.equal(poolScore(ultra, NOW) / poolScore(max, NOW), 2);
+  // Well ahead of an even pace through its week, it gives way to a fresh Max account.
+  const ahead = { ...ultra, seven_day_pct: 80, seven_day_resets_at: inHours(120) };
+  assert.ok(poolScore(ahead, NOW) < poolScore(max, NOW));
 });
 
 test("says when the earliest account frees up", () => {
