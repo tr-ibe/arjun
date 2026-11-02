@@ -44,3 +44,6 @@ export const config = {
   // Only tests change this, so timeouts can be measured in milliseconds.
   msPerMinute: Number(process.env.MS_PER_MINUTE ?? 60_000),
 };
+
+// Environment variables Claude must never see.
+export const SECRET_ENV = ["AUTH_USERNAME", "AUTH_PASSWORD", "SESSION_SECRET", "SLACK_USER_TOKEN", "SLACK_APP_TOKEN"];

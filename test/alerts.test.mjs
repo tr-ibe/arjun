@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, test } from "node:test";
@@ -208,4 +208,30 @@ test("a paused queue alerts after the set time, repeats until resumed, then says
   const count = posted.length;
   await sleep(1_000);
   assert.equal(posted.length, count, "nothing more once resumed");
+});
+
+test("an account whose login can't be renewed alerts once with the fix, and again when it works", async () => {
+  const dir = join(tmp, "accounts", "spare");
+  const login = (expiresAt) => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: "tok-spare", expiresAt } }));
+  };
+  login(Date.now() - 60_000);
+  writeFileSync(join(dir, "fake-login-dead"), "");
+  const before = posted.length;
+  await call("POST", "/api/accounts/check", {});
+  const alert = await waitFor(() => postedSince(before).find((t) => t.includes("*spare* needs repair")), "alerted");
+  assert.match(alert, /> OAuth token has been revoked/);
+  assert.match(alert, /run `add-account spare`, then `\/login`/);
+  assert.match(alert, /<https:\/\/arjun.example.com\/settings\|Open the console>/);
+  await sleep(600);
+  assert.equal(postedSince(before).filter((t) => t.includes("spare")).length, 1, "not repeated");
+
+  // Logging in again (a newer credentials file) fixes it.
+  rmSync(join(dir, "fake-login-dead"));
+  login(Date.now() + 86400_000);
+  await call("POST", "/api/accounts/check", {});
+  await waitFor(() => postedSince(before).some((t) => t === "Claude account *spare* works again."), "said it works again");
+  // The no-accounts alert is still on: its own state no longer overwrites the setting.
+  assert.equal((await call("GET", "/api/settings")).data.settings.alert_no_accounts, true);
 });

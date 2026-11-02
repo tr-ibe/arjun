@@ -1,13 +1,18 @@
 import type { FastifyBaseLogger } from "fastify";
+import { spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { prepareAccountDir, readLogin } from "./account_dir.js";
-import { config } from "./config.js";
+import { config, SECRET_ENV } from "./config.js";
 import { db, now, type AccountRow } from "./db.js";
+import { detectUsageLimit } from "./limit.js";
 import {
   chooseAccount,
   currentPct,
+  detectLoginFailure,
   nextFreeAt,
+  hasFiveHourLimit,
   hasWeeklyLimit,
   parseUsage,
   planSizeFromTier,
@@ -29,6 +34,9 @@ const MIN_CHECK_GAP_MS = 60_000;
 // After a "rate limited" reply, leave the account alone for this long, doubling up to the cap.
 const BACKOFF_FIRST_MS = 5 * 60_000;
 const BACKOFF_MAX_MS = 30 * 60_000;
+// An expired login is renewed with a tiny run at most this often per account, and the run gets this long.
+const RENEW_EVERY_MS = 30 * 60_000;
+const RENEW_TIMEOUT_MS = 2 * 60_000;
 
 export const isMain = (a: { config_dir: string }) => a.config_dir === config.claudeConfigDir;
 
@@ -125,6 +133,19 @@ export function markLoginFailed(id: number, message: string): void {
   updateAccount(id, { login_error: message, login_error_at: now() });
 }
 
+// Accounts that are turned on but can't be used until someone logs them in again, with how to fix
+// each. Main without a saved login isn't one: Claude may keep its login elsewhere (the macOS keychain).
+export function accountsNeedingRepair(): { id: number; name: string; problem: string; fix: string }[] {
+  return accountStates()
+    .filter((a) => a.enabled && (a.login_error || !a.folder_exists))
+    .map((a) => ({
+      id: a.id,
+      name: a.name,
+      problem: a.folder_exists ? a.login_error! : `Its folder ${a.config_dir} is missing.`,
+      fix: isMain(a) ? "claude" : `add-account ${a.name}`,
+    }));
+}
+
 // ---- Usage ----
 
 function loginChangedSince(dir: string, iso: string): boolean {
@@ -150,6 +171,9 @@ async function checkUsage(a: AccountRow): Promise<void> {
     fields.login_error = null;
     fields.login_error_at = null;
   }
+  // A login known not to work waits for a person; renewing it wouldn't help.
+  let renew = false;
+  const loginOk = !a.login_error || fields.login_error === null;
 
   if (!login) {
     if (isMain(a)) {
@@ -159,8 +183,10 @@ async function checkUsage(a: AccountRow): Promise<void> {
       fields.login_error_at = now();
     }
   } else if (login.expiresAt && login.expiresAt < Date.now()) {
-    // Claude renews the token when it next runs; renewing it here could race with a run doing the same.
-    fields.usage_error = "The saved login token has expired. Claude renews it on the next run.";
+    renew = loginOk;
+    fields.usage_error = renew
+      ? "The saved login token has expired. Arjun is asking Claude to renew it."
+      : "The saved login token has expired.";
   } else {
     try {
       const res = await fetch(config.usageUrl, {
@@ -179,13 +205,74 @@ async function checkUsage(a: AccountRow): Promise<void> {
         if (usage) Object.assign(fields, usage, { usage_error: null });
         else fields.usage_error = res.ok ? "Couldn't read the usage reply." : `Usage check failed (HTTP ${res.status}).`;
         if (res.ok) backoff.delete(a.id);
+        // The token was refused before it expired (revoked, or renewed elsewhere): let Claude sort it out.
+        if (res.status === 401) renew = loginOk;
       }
     } catch (err) {
       fields.usage_error = `Usage check failed: ${(err as Error).message}`;
     }
   }
   updateAccount(a.id, fields);
+  if (renew) void renewLogin(a.id);
 }
+
+// ---- Renewing an expired login ----
+//
+// Claude Code renews an expired login itself the next time it runs on the account. A fallback gets no
+// runs while main has room, so its login could sit expired for days, and whether it still works would
+// only show when it's needed. So Arjun starts a tiny run on it instead (a one-word answer from Haiku,
+// no tools, nothing saved): Claude Code renews the login the way it always does, and a login that no
+// longer works shows up as Needs login, with a Slack alert, straight away. Claude Code also takes care
+// of runs renewing the same login at once, as it does for runs sharing an account.
+
+const lastRenewal = new Map<number, number>();
+const renewing = new Set<number>();
+
+async function renewLogin(id: number): Promise<void> {
+  if (renewing.has(id) || Date.now() - (lastRenewal.get(id) ?? 0) < RENEW_EVERY_MS) return;
+  const a = getAccount(id);
+  if (!a) return;
+  renewing.add(id);
+  lastRenewal.set(id, Date.now());
+  try {
+    const { code, output } = await askClaude(a.config_dir);
+    const limit = code !== 0 ? detectUsageLimit(output) : null;
+    if (!limit && detectLoginFailure(output)) {
+      markLoginFailed(id, lastLines(output));
+      return;
+    }
+    if (limit) markLimited(id, limit.resetsAt);
+    const login = readLogin(a.config_dir);
+    if (login?.expiresAt && login.expiresAt > Date.now()) {
+      await checkUsage(getAccount(id)!);
+    } else {
+      const minutes = Math.round(RENEW_EVERY_MS / 60_000);
+      const said = lastLines(output);
+      updateAccount(id, { usage_error: `Claude didn't renew the expired login; Arjun tries again in ${minutes} minutes.${said ? ` Claude said: ${said}` : ""}` });
+    }
+  } finally {
+    renewing.delete(id);
+  }
+}
+
+function askClaude(configDir: string): Promise<{ code: number | null; output: string }> {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of SECRET_ENV) delete env[key];
+  // As for runs, the main account runs without CLAUDE_CONFIG_DIR.
+  if (configDir !== config.claudeConfigDir) env.CLAUDE_CONFIG_DIR = configDir;
+  const args = ["-p", "Reply with the single word OK.", "--model", "haiku", "--tools", "", "--strict-mcp-config", "--no-session-persistence"];
+  return new Promise((resolve) => {
+    let output = "";
+    const child = spawn(config.claudeBin, args, { cwd: tmpdir(), env, stdio: ["ignore", "pipe", "pipe"], timeout: RENEW_TIMEOUT_MS });
+    const add = (c: Buffer) => (output = (output + c.toString("utf8")).slice(-8_000));
+    child.stdout.on("data", add);
+    child.stderr.on("data", add);
+    child.on("error", (err) => resolve({ code: null, output: `Could not start Claude: ${err.message}` }));
+    child.on("close", (code) => resolve({ code, output }));
+  });
+}
+
+const lastLines = (text: string) => text.trim().split("\n").slice(-3).join("\n").slice(-1_000).trim();
 
 // After a run on the account ends, so the next run is routed on what this one used.
 export async function checkAccount(id: number): Promise<void> {
@@ -281,6 +368,7 @@ export function accountViews() {
       limited_until: a.limited_until && Date.parse(a.limited_until) > nowMs ? a.limited_until : null,
       login_error: a.login_error,
       five_hour_pct: a.five_hour_pct == null ? null : fiveHour,
+      five_hour_limit: hasFiveHourLimit(a),
       five_hour_resets_at: a.five_hour_resets_at,
       seven_day_pct: a.seven_day_pct == null ? null : weekly,
       weekly_limit: hasWeeklyLimit(a),

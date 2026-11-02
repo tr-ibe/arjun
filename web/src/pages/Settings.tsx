@@ -248,6 +248,14 @@ export function SettingsPage() {
           />
           Alert when no Claude account can take runs (all past their limits, off, or logged out), and when one can again
         </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={form.alert_account_repair}
+            onChange={(e) => set("alert_account_repair", e.target.checked)}
+          />
+          Alert when a Claude account needs logging in again, with how to fix it, and when it works again
+        </label>
 
         {message && <div className={message.ok ? "form-ok" : "form-error"}>{message.text}</div>}
         <div className="actions">
@@ -329,7 +337,11 @@ function Accounts({ thresholds }: { thresholds: Settings }) {
                   {a.login_error && <div className="sub">{a.login_error}</div>}
                 </td>
                 <td>
-                  <Usage pct={a.five_hour_pct} resetsAt={a.five_hour_resets_at} switchAt={a.is_main ? thresholds.switch_at_5h_pct : undefined} />
+                  {a.five_hour_limit ? (
+                    <Usage pct={a.five_hour_pct} resetsAt={a.five_hour_resets_at} switchAt={a.is_main ? thresholds.switch_at_5h_pct : undefined} />
+                  ) : (
+                    <span className="muted">No 5-hour limit</span>
+                  )}
                 </td>
                 <td>
                   {a.weekly_limit ? (
@@ -538,11 +550,12 @@ function ArjunTools() {
   );
 }
 
-// Plan sizes, as multiples of Pro. A bigger plan takes a bigger share of the runs.
+// Plan sizes, as multiples of Pro's weekly usage. A bigger plan takes a bigger share of the runs.
+// Ultra was Max 20x until 30 Oct 2026; its week was always 10× Pro's.
 const PLANS = [
   { size: 1, label: "Pro" },
-  { size: 5, label: "Max 5x" },
-  { size: 20, label: "Max 20x" },
+  { size: 5, label: "Max" },
+  { size: 10, label: "Ultra" },
 ];
 
 function planLabel(size: number): string {

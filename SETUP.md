@@ -120,7 +120,7 @@ To stop using an account for a while without removing it, **Turn off** is enough
 
 ### Logging an account in again
 
-When a row says **Needs login**: run `add-account <name>` (or `claude` for main), `/login`, `/exit`. Arjun notices the new login on its next check, or press **Try again** on the row.
+When a row says **Needs login** (Slack gets an alert too): run `add-account <name>` (or `claude` for main), `/login`, `/exit`. Arjun notices the new login on its next check, or press **Try again** on the row.
 
 ### Putting a different subscription behind an account
 

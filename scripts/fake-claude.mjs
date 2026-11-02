@@ -6,6 +6,10 @@
 //   FAKE_SLEEP=<seconds>                                        (default 0.2)
 // When a prompt has several, the last one wins, so a continue's new instructions take effect.
 // FAKE_SLEEP also carries over from earlier turns of a resumed session, so a slow run stays slow.
+//
+// Arjun's login renewal (a run with --no-session-persistence) instead renews the account's saved login,
+// the way Claude Code does, unless the account's folder has a file named fake-login-dead. Each one is
+// logged to renewals.log in the folder.
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -26,6 +30,19 @@ const directive = (name, fallback, text = prompt) => {
 function fail(message, code) {
   console.error(message);
   process.exit(code);
+}
+
+if (args.includes("--no-session-persistence")) {
+  const dir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+  appendFileSync(join(dir, "renewals.log"), `${JSON.stringify(args)}\n`);
+  if (process.env.AUTH_PASSWORD || process.env.SLACK_USER_TOKEN) fail("fake-claude: secrets leaked into the environment", 4);
+  if (existsSync(join(dir, "fake-login-dead"))) fail("OAuth token has been revoked. Please run /login", 1);
+  const file = join(dir, ".credentials.json");
+  const creds = JSON.parse(readFileSync(file, "utf8"));
+  creds.claudeAiOauth.expiresAt = Date.now() + 8 * 3600_000;
+  writeFileSync(file, JSON.stringify(creds));
+  console.log("OK");
+  process.exit(0);
 }
 
 if (!sessionId) fail("fake-claude: no --session-id or --resume", 5);
