@@ -255,7 +255,14 @@ test("cancels a running run", async () => {
   const running = await waitFor(task.id, "running");
   const res = await call("POST", `/api/runs/${running.latest_run.id}/cancel`, { body: {} });
   assert.equal(res.status, 200);
-  const cancelled = await waitFor(task.id, "cancelled");
+  await waitFor(task.id, "cancelled");
+  // The status flips at once; the end time is set when Claude's process has exited.
+  let cancelled;
+  for (let i = 0; i < 100 && !cancelled?.latest_run.ended_at; i++) {
+    cancelled = (await call("GET", `/api/tasks/${task.id}`)).data;
+    if (!cancelled.latest_run.ended_at) await sleep(50);
+  }
+  assert.equal(cancelled.latest_run.status, "cancelled");
   assert.ok(cancelled.latest_run.ended_at);
   assert.equal((await call("POST", `/api/runs/${running.latest_run.id}/cancel`, { body: {} })).status, 409);
 });
