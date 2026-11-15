@@ -8,7 +8,7 @@ Runs Claude Code tasks unattended. People create tasks in the web UI, other serv
 - **Each run** is `claude -p "<prompt>" --session-id … --model … --effort … --dangerously-skip-permissions`, working in `~/runs/<run_id>/`.
 - **The prompt** tells Claude it's on its own and must finish by running `update_run done|stuck|error "<summary>"`. That command reports to the server over localhost using the `RUN_ID` the server set.
 - **Continue** resumes the same Claude session (`--resume`) in the same folder, with new instructions.
-- **History** is Claude's own session file in `~/.claude/projects`, kept 60 days (the server sets `cleanupPeriodDays` on first start).
+- **History** is Claude's own session file in `~/.claude/projects`. Arjun removes a run's files once nothing in them has changed for 7 days (`KEEP_IDLE_RUNS_DAYS`), checking every hour and skipping tasks that have a run queued or running. It marks the run first (`history_removed_at`). After that the run's timeline is empty and its task can't be continued from the UI or API; a new reply in a Slack thread starts a fresh session that rereads the thread.
 - **Usage limit:** the run is marked `limited` and a continue is queued automatically. It starts on another Claude account with room, or, if there's only one account, after the reset time.
 - Everything that must survive a redeploy is in `/home/node`, the one volume: Claude's logins and history, `data/arjun.db`, and `runs/`.
 

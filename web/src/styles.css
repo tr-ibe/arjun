@@ -199,6 +199,28 @@ tbody tr:hover { background: var(--bg); }
 .clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 tr.revoked td { color: var(--muted); }
 .empty { padding: 28px; text-align: center; color: var(--muted); }
+.select-col { width: 1%; padding: 0; vertical-align: top; }
+/* The whole cell toggles the box, so it's an easy target. */
+.select-hit { display: flex; justify-content: center; padding: 13px 6px 13px 14px; cursor: pointer; }
+.select-hit input { cursor: pointer; width: 15px; height: 15px; }
+th .select-hit { padding-top: 11px; padding-bottom: 11px; }
+tbody tr.selected { background: var(--accent-soft); }
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: var(--accent-soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-weight: 550;
+  min-height: 50px;
+}
+.bulk-bar .muted { font-weight: 400; font-size: 13px; }
+.bulk-note { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+.dismiss { color: inherit; font-size: 16px; line-height: 1; }
 .pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
 
 /* ---- Task detail ---- */

@@ -21,6 +21,8 @@ export const config = {
   runsDir: process.env.RUNS_DIR ?? join(homedir(), "runs"),
   claudeConfigDir: process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"),
   claudeBin: process.env.CLAUDE_BIN ?? "claude",
+  // A run's conversation is removed once nothing in it has changed for this many days.
+  keepIdleRunsDays: Number(process.env.KEEP_IDLE_RUNS_DAYS ?? 7),
   // Extra Claude accounts, one config folder each (the main account uses claudeConfigDir).
   accountsDir: process.env.ACCOUNTS_DIR ?? join(homedir(), "accounts"),
   usageUrl: process.env.CLAUDE_USAGE_URL ?? "https://api.anthropic.com/api/oauth/usage",
