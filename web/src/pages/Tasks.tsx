@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, type ApiKey, type TaskListItem } from "../api";
+import { api, retryTasks, type ApiKey, type RetryResult, type TaskListItem } from "../api";
 import { StatusPill } from "../components";
 import { duration, STATUS_LABEL, timeAgo } from "../format";
 import { usePolling, useReloadable } from "../hooks";
@@ -22,7 +22,7 @@ export function Tasks() {
   if (source) query.set("source", source);
   if (q) query.set("q", q);
 
-  const { data, error } = useReloadable(
+  const { data, error, reload } = useReloadable(
     () => api<{ items: TaskListItem[]; has_more: boolean; total: number }>(`/api/tasks?${query}`),
     5000,
     [query.toString()],
@@ -43,6 +43,41 @@ export function Tasks() {
     setParams(next);
     window.scrollTo({ top: 0 });
   }
+  // Failed tasks ticked for retrying together. Only ones still retryable on this page count, so a
+  // task that was retried elsewhere (or scrolled off by a filter) quietly drops out.
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [retrying, setRetrying] = useState(false);
+  const [outcome, setOutcome] = useState<{ result?: RetryResult; error?: string } | null>(null);
+  const retryable = (data?.items ?? []).filter((t) => t.can_retry).map((t) => t.id);
+  const chosen = retryable.filter((id) => selected.has(id));
+  const allChosen = retryable.length > 0 && chosen.length === retryable.length;
+  const headBox = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headBox.current) headBox.current.indeterminate = chosen.length > 0 && !allChosen;
+  });
+
+  function toggle(id: number) {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelected(next);
+  }
+
+  async function retryChosen() {
+    setRetrying(true);
+    setOutcome(null);
+    try {
+      const result = await retryTasks(chosen);
+      setOutcome({ result });
+      setSelected(new Set());
+      void reload();
+    } catch (e) {
+      setOutcome({ error: (e as Error).message });
+    } finally {
+      setRetrying(false);
+    }
+  }
+
   const types = usePolling(() => api<string[]>("/api/types"), 30000) ?? [];
   const keys = usePolling(() => api<ApiKey[]>("/api/keys"), 60000) ?? [];
 
@@ -102,10 +137,64 @@ export function Tasks() {
 
       {error && <div className="banner bad">{error}</div>}
 
+      {retryable.length > 0 && (
+        <div className="bulk-bar" role="region" aria-label="Retry failed tasks">
+          {chosen.length > 0 ? (
+            <>
+              <span>
+                {chosen.length} failed {chosen.length === 1 ? "task" : "tasks"} selected
+              </span>
+              <button className="primary" onClick={retryChosen} disabled={retrying}>
+                {retrying ? "Queuing…" : `Retry ${chosen.length}`}
+              </button>
+              <button className="link" onClick={() => setSelected(new Set())}>
+                Clear
+              </button>
+              <span className="muted">Each continues where it left off with “Try again.”</span>
+            </>
+          ) : (
+            <>
+              <span>
+                {retryable.length} failed {retryable.length === 1 ? "task" : "tasks"} on this page
+              </span>
+              <button className="secondary" onClick={() => setSelected(new Set(retryable))}>
+                Select all failed
+              </button>
+              <span className="muted">or tick the ones to retry.</span>
+            </>
+          )}
+        </div>
+      )}
+      {outcome?.error && <div className="form-error bulk-note">{outcome.error}</div>}
+      {outcome?.result && (
+        <div className={`${outcome.result.skipped.length ? "form-error" : "form-ok"} bulk-note`}>
+          {outcome.result.retried.length > 0 &&
+            `Queued ${outcome.result.retried.length} ${outcome.result.retried.length === 1 ? "retry" : "retries"}. `}
+          {outcome.result.skipped.length > 0 &&
+            `Skipped ${outcome.result.skipped.map((s) => `#${s.id} (${s.reason})`).join(", ")}`}
+          <button className="link dismiss" onClick={() => setOutcome(null)} aria-label="Dismiss">
+            ×
+          </button>
+        </div>
+      )}
+
       <div className="table-wrap">
         <table className="tasks">
           <thead>
             <tr>
+              <th className="select-col">
+                <label className="select-hit">
+                  <input
+                    ref={headBox}
+                    type="checkbox"
+                    aria-label="Select all failed tasks on this page"
+                    title={retryable.length ? "Select all failed tasks on this page" : "No failed tasks on this page"}
+                    disabled={retryable.length === 0}
+                    checked={allChosen}
+                    onChange={() => setSelected(allChosen ? new Set() : new Set(retryable))}
+                  />
+                </label>
+              </th>
               <th>Status</th>
               <th>Task</th>
               <th>Type</th>
@@ -117,7 +206,19 @@ export function Tasks() {
           </thead>
           <tbody>
             {data?.items.map((t) => (
-              <tr key={t.id}>
+              <tr key={t.id} className={selected.has(t.id) && t.can_retry ? "selected" : undefined}>
+                <td className="select-col">
+                  {t.can_retry && (
+                    <label className="select-hit">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${t.title} to retry`}
+                        checked={selected.has(t.id)}
+                        onChange={() => toggle(t.id)}
+                      />
+                    </label>
+                  )}
+                </td>
                 <td>
                   <StatusPill status={t.latest_run.status} />
                   {t.latest_run.queue_position && (

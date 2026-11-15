@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, type Run, type Task, type TimelineEntry } from "../api";
+import { api, retryTasks, type Run, type Task, type TimelineEntry } from "../api";
 import { StatusPill } from "../components";
 import { ACTIVE, clock, duration, timeOnly } from "../format";
 import { useReloadable } from "../hooks";
@@ -58,8 +58,15 @@ export function TaskDetail() {
 
       <div className="detail-grid">
         <div className="detail-main">
-          <LatestCard run={latest} onChanged={reloadAll} />
-          <ContinueForm task={t} onContinued={reloadAll} />
+          <LatestCard run={latest} taskId={t.id} canRetry={t.can_retry} onChanged={reloadAll} />
+          {t.continue_blocked ? (
+            <section className="card continue">
+              <h2>Continue</h2>
+              <p className="muted">{t.continue_blocked}</p>
+            </section>
+          ) : (
+            <ContinueForm task={t} onContinued={reloadAll} />
+          )}
           <Timeline entries={timeline.data?.entries ?? null} missing={timeline.data?.missing ?? false} />
         </div>
         <aside className="detail-side">
@@ -81,10 +88,35 @@ export function TaskDetail() {
   );
 }
 
-function LatestCard({ run, onChanged }: { run: Run; onChanged: () => void }) {
+function LatestCard({
+  run,
+  taskId,
+  canRetry,
+  onChanged,
+}: {
+  run: Run;
+  taskId: number;
+  canRetry: boolean;
+  onChanged: () => void;
+}) {
   const [confirming, setConfirming] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const canCancel = ACTIVE.includes(run.status);
+
+  async function retry() {
+    setRetrying(true);
+    setError(null);
+    try {
+      const { skipped } = await retryTasks([taskId]);
+      if (skipped.length) setError(skipped[0].reason);
+      onChanged();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   async function cancel() {
     try {
@@ -121,6 +153,14 @@ function LatestCard({ run, onChanged }: { run: Run; onChanged: () => void }) {
       {run.error && run.error !== run.summary && <pre className="error-text">{run.error}</pre>}
       {run.status === "limited" && (
         <p className="muted">A continue is queued and starts on the next Claude account that has room.</p>
+      )}
+      {canRetry && (
+        <div className="actions">
+          <button className="primary" onClick={retry} disabled={retrying}>
+            {retrying ? "Queuing…" : "Retry"}
+          </button>
+          <span className="muted">Continues where it left off with “Try again.” For other instructions, use Continue below.</span>
+        </div>
       )}
       {canCancel && (
         <div className="actions">
@@ -257,7 +297,7 @@ function Timeline({ entries, missing }: { entries: TimelineEntry[] | null; missi
       <h2>Timeline</h2>
       {missing && (
         <p className="muted">
-          Part of the history isn't available. Claude keeps session files for 60 days, and a run that never started has none.
+          Part of the history isn't available. A run's steps are removed once it has been idle for 7 days, and a run that never started has none.
         </p>
       )}
       {entries.length === 0 && !missing && <p className="muted">Nothing yet. Steps appear here once Claude starts.</p>}

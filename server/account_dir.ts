@@ -44,8 +44,9 @@ export function prepareAccountDir(dir: string, mainDir: string): void {
 }
 
 // Run history lives in Claude's session files, which Claude Code deletes after 30 days by default.
-// Keep them for 60 unless someone already chose a value. Every account needs it: they all clean up
-// the shared projects folder.
+// Arjun removes a run's files itself once the run has been idle for a week (session_cleanup.ts); this
+// 60 only covers anything else in the folder. Every account needs it: they all clean up the shared
+// projects folder.
 export function ensureCleanupPeriod(dir: string): void {
   const file = join(dir, "settings.json");
   let settings: Record<string, unknown> = {};

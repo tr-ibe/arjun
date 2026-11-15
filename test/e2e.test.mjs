@@ -5,6 +5,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, test } from "node:test";
+import Database from "better-sqlite3";
 
 const root = resolve(import.meta.dirname, "..");
 const tmp = mkdtempSync(join(tmpdir(), "arjun-test-"));
@@ -174,6 +175,62 @@ test("continues a stuck task in the same session and folder", async () => {
   assert.match(prompts[1].text, /The previous attempt ended as "stuck"/);
 });
 
+test("won't continue a task whose conversation was deleted", async () => {
+  const task = await createTask({ prompt: "Try it. FAKE_OUTCOME=stuck" });
+  const stuck = await waitFor(task.id, "stuck");
+  assert.equal(stuck.continue_blocked, null);
+
+  // What the cleanup does when it deletes the run's conversation.
+  const db = new Database(join(tmp, "data", "arjun.db"));
+  db.prepare("UPDATE runs SET history_removed_at = ? WHERE id = ?").run(new Date().toISOString(), stuck.latest_run.id);
+  db.close();
+
+  const view = (await call("GET", `/api/tasks/${task.id}`)).data;
+  assert.match(view.continue_blocked, /can't be continued/);
+  const res = await call("POST", `/api/tasks/${task.id}/continue`, { body: { message: "Carry on." } });
+  assert.equal(res.status, 409);
+  assert.match(res.data.error, /can't be continued/);
+  assert.equal((await call("GET", `/api/tasks/${task.id}`)).data.runs.length, 1);
+});
+
+test("retries failed tasks together and skips the ones it can't", async () => {
+  const a = await createTask({ prompt: "First. FAKE_OUTCOME=stuck" });
+  const b = await createTask({ prompt: "Second. FAKE_OUTCOME=stuck" });
+  const ok = await createTask({ prompt: "Fine. FAKE_OUTCOME=done" });
+  const gone = await createTask({ prompt: "Old. FAKE_OUTCOME=stuck" });
+  const [stuckA] = [await waitFor(a.id, "stuck"), await waitFor(b.id, "stuck"), await waitFor(ok.id, "done")];
+  const stuckGone = await waitFor(gone.id, "stuck");
+  assert.equal(stuckA.can_retry, true);
+  const db = new Database(join(tmp, "data", "arjun.db"));
+  db.prepare("UPDATE runs SET history_removed_at = ? WHERE id = ?").run(new Date().toISOString(), stuckGone.latest_run.id);
+  db.close();
+
+  const list = (await call("GET", "/api/tasks?limit=200")).data.items;
+  const canRetry = (id) => list.find((t) => t.id === id).can_retry;
+  assert.deepEqual([canRetry(a.id), canRetry(b.id), canRetry(ok.id), canRetry(gone.id)], [true, true, false, false]);
+
+  const res = await call("POST", "/api/tasks/retry", { body: { task_ids: [a.id, b.id, ok.id, gone.id, 999999, a.id] } });
+  assert.equal(res.status, 200, JSON.stringify(res.data));
+  assert.deepEqual(res.data.retried, [a.id, b.id]);
+  assert.deepEqual(
+    res.data.skipped.map((s) => s.id),
+    [ok.id, gone.id, 999999],
+  );
+  assert.match(res.data.skipped[0].reason, /done, not failed/);
+  assert.match(res.data.skipped[1].reason, /can't be continued/);
+  assert.match(res.data.skipped[2].reason, /not found/);
+
+  // Each retry continues the same session with "Try again."
+  for (const id of [a.id, b.id]) {
+    const after = await waitFor(id, ["stuck", "done"], { attempt: 2 });
+    assert.equal(after.latest_run.instructions, "Try again.");
+    assert.equal(after.latest_run.session_id, after.runs[0].session_id);
+  }
+  assert.equal((await call("GET", `/api/tasks/${ok.id}`)).data.runs.length, 1);
+
+  assert.equal((await call("POST", "/api/tasks/retry", { body: { task_ids: [] } })).status, 400);
+});
+
 test("marks a run that never reported as an error, with Claude's last words", async () => {
   const task = await createTask({ prompt: "FAKE_OUTCOME=noreport" });
   const run = (await waitFor(task.id, "error")).latest_run;
@@ -198,7 +255,14 @@ test("cancels a running run", async () => {
   const running = await waitFor(task.id, "running");
   const res = await call("POST", `/api/runs/${running.latest_run.id}/cancel`, { body: {} });
   assert.equal(res.status, 200);
-  const cancelled = await waitFor(task.id, "cancelled");
+  await waitFor(task.id, "cancelled");
+  // The status flips at once; the end time is set when Claude's process has exited.
+  let cancelled;
+  for (let i = 0; i < 100 && !cancelled?.latest_run.ended_at; i++) {
+    cancelled = (await call("GET", `/api/tasks/${task.id}`)).data;
+    if (!cancelled.latest_run.ended_at) await sleep(50);
+  }
+  assert.equal(cancelled.latest_run.status, "cancelled");
   assert.ok(cancelled.latest_run.ended_at);
   assert.equal((await call("POST", `/api/runs/${running.latest_run.id}/cancel`, { body: {} })).status, 409);
 });

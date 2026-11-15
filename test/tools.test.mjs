@@ -102,6 +102,16 @@ before(async () => {
     body: JSON.stringify({ username: "admin", password: "correct horse" }),
   });
   cookie = res.headers.get("set-cookie").split(";")[0];
+
+  // Arjun answers before its first plugin fetch is done, and a check asked for meanwhile joins that
+  // fetch. Wait for it, so the tests see the finished result: a commit for the good source, an error
+  // for the missing one.
+  for (let i = 0; i < 200; i++) {
+    const { plugins } = (await call("GET", "/api/tools")).data;
+    if (plugins[0].commit && plugins[1].error) return;
+    await sleep(50);
+  }
+  throw new Error("the first plugin fetch never finished");
 });
 
 after(() => {

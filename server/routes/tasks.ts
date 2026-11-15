@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { db, getRun, getTask, insertRun, insertTask, latestRun, now, runsForTask, updateRun, type RunRow, type TaskRow } from "../db.js";
 import { kick, queuePaused, queuePositions } from "../dispatcher.js";
+import { config } from "../config.js";
 import { activeCount, isActive, stopRun } from "../runner.js";
 import { checkEffort, checkInt, checkModel, getSettings, isQueuePaused, setQueuePaused, ValidationError } from "../settings.js";
 import { readTimeline } from "../timeline.js";
@@ -37,6 +38,29 @@ function runView(run: RunRow, positions: Map<number, number>) {
   return { ...rest, account_name: account?.name ?? null, queue_position: positions.get(run.id) ?? null };
 }
 
+// A continue resumes the conversation of the nearest attempt that started. Once that conversation has
+// been deleted, continuing would quietly start over without it, so it isn't offered. A task none of
+// whose attempts started has no conversation to lose and can still be continued.
+function continueBlocked(taskId: number): string | null {
+  let run = latestRun(taskId);
+  while (run && !run.started_at) run = run.resumed_from_run_id ? getRun(run.resumed_from_run_id) : undefined;
+  if (!run?.history_removed_at) return null;
+  return `This task's conversation is no longer kept (Arjun deletes it after ${config.keepIdleRunsDays} days without activity), so it can't be continued. Start a new task instead.`;
+}
+
+// Attempts that ended without finishing the work. Retrying one continues it with "Try again."
+const FAILED: RunRow["status"][] = ["error", "stuck", "timeout"];
+const RETRY_MESSAGE = "Try again.";
+const MAX_RETRY = 200;
+
+// Why a task can't be retried right now, or null if it can.
+function retryBlocked(taskId: number): string | null {
+  const latest = latestRun(taskId);
+  if (!latest) return "Task not found.";
+  if (!FAILED.includes(latest.status)) return `Its latest attempt is ${latest.status}, not failed.`;
+  return continueBlocked(taskId);
+}
+
 function taskView(taskId: number) {
   const task = getTask(taskId)!;
   const positions = queuePositions();
@@ -50,6 +74,8 @@ function taskView(taskId: number) {
     slack_url: slack?.permalink ?? null,
     latest_run: runs[runs.length - 1],
     runs,
+    continue_blocked: continueBlocked(taskId),
+    can_retry: retryBlocked(taskId) === null,
   };
 }
 
@@ -137,6 +163,7 @@ export async function taskRoutes(app: FastifyInstance) {
       created_at: row.created_at,
       source_label:
         row.source === "ui" ? "UI" : row.source === "slack" ? "Slack" : ((row.key_name as string | null) ?? "API"),
+      can_retry: FAILED.includes(row.status as RunRow["status"]) && retryBlocked(row.id) === null,
       latest_run: {
         id: row.run_id,
         attempt: row.attempt,
@@ -164,12 +191,41 @@ export async function taskRoutes(app: FastifyInstance) {
     if (!getTask(id)) return reply.code(404).send({ error: "Task not found." });
     const body = (req.body ?? {}) as Record<string, unknown>;
     const message = text("message", body.message, 100_000);
+    const blocked = continueBlocked(id);
+    if (blocked) return reply.code(409).send({ error: blocked });
     const previous = latestRun(id)!;
     const timeout =
       body.timeout_min == null ? previous.timeout_min : checkInt("timeout_min", body.timeout_min, 1, 24 * 60);
     insertRun({ task_id: id, instructions: message, timeout_min: timeout, resumed_from_run_id: previous.id });
     kick();
     return reply.code(201).send(taskView(id));
+  });
+
+  // Retry failed tasks, one or many: each gets a continue saying "Try again.", like pressing Continue
+  // by hand. Tasks that can't be retried are skipped with the reason; the rest still go ahead.
+  app.post("/api/tasks/retry", async (req) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const ids = body.task_ids;
+    if (!Array.isArray(ids) || ids.length === 0 || ids.length > MAX_RETRY) {
+      throw new ValidationError(`task_ids must be a list of 1 to ${MAX_RETRY} task ids.`);
+    }
+    const unique = [...new Set(ids.map(idParam))];
+    const retried: number[] = [];
+    const skipped: { id: number; reason: string }[] = [];
+    db.transaction(() => {
+      for (const id of unique) {
+        const reason = getTask(id) ? retryBlocked(id) : "Task not found.";
+        if (reason) {
+          skipped.push({ id, reason });
+          continue;
+        }
+        const previous = latestRun(id)!;
+        insertRun({ task_id: id, instructions: RETRY_MESSAGE, timeout_min: previous.timeout_min, resumed_from_run_id: previous.id });
+        retried.push(id);
+      }
+    })();
+    if (retried.length) kick();
+    return { retried, skipped };
   });
 
   app.get("/api/tasks/:id/timeline", async (req, reply) => {

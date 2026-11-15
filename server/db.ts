@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "./config.js";
+import { savedSessionIds } from "./session_cleanup.js";
 
 export type RunStatus =
   | "queued"
@@ -42,6 +43,8 @@ export interface RunRow {
   exit_code: number | null;
   resets_at: string | null;
   account_id: number | null;
+  // When this run's Claude conversation was deleted from disk. Its task can't be continued after that.
+  history_removed_at: string | null;
   created_at: string;
   started_at: string | null;
   ended_at: string | null;
@@ -182,6 +185,22 @@ db.exec(`
 // Columns added after the first release.
 const runColumns = (db.prepare("PRAGMA table_info(runs)").all() as { name: string }[]).map((c) => c.name);
 if (!runColumns.includes("account_id")) db.exec("ALTER TABLE runs ADD COLUMN account_id INTEGER REFERENCES accounts(id)");
+if (!runColumns.includes("history_removed_at")) {
+  db.exec("ALTER TABLE runs ADD COLUMN history_removed_at TEXT");
+  // Conversations deleted before Arjun kept track: any finished run whose session file is already gone.
+  const saved = savedSessionIds(join(config.claudeConfigDir, "projects"));
+  const finished = db
+    .prepare(
+      `SELECT id, session_id FROM runs
+        WHERE session_id IS NOT NULL AND started_at IS NOT NULL AND status NOT IN ('queued', 'running')`,
+    )
+    .all() as { id: number; session_id: string }[];
+  const mark = db.prepare("UPDATE runs SET history_removed_at = ? WHERE id = ?");
+  const at = new Date().toISOString();
+  db.transaction(() => {
+    for (const r of finished) if (!saved.has(r.session_id)) mark.run(at, r.id);
+  })();
+}
 const accountColumns = (db.prepare("PRAGMA table_info(accounts)").all() as { name: string }[]).map((c) => c.name);
 if (!accountColumns.includes("plan_tier")) db.exec("ALTER TABLE accounts ADD COLUMN plan_tier TEXT");
 if (!accountColumns.includes("plan_size")) db.exec("ALTER TABLE accounts ADD COLUMN plan_size REAL");

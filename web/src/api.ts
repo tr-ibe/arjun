@@ -35,6 +35,10 @@ export interface Task {
   created_at: string;
   latest_run: Run;
   runs: Run[];
+  // Why the task can't be continued (its conversation was deleted), or null if it can.
+  continue_blocked: string | null;
+  // Its latest attempt failed (error, stuck or timed out) and it can be continued.
+  can_retry: boolean;
 }
 
 export interface TaskListItem {
@@ -46,10 +50,20 @@ export interface TaskListItem {
   effort: string;
   created_at: string;
   source_label: string;
+  can_retry: boolean;
   latest_run: Pick<
     Run,
     "id" | "attempt" | "status" | "summary" | "error" | "created_at" | "started_at" | "ended_at" | "resets_at" | "queue_position"
   >;
+}
+
+export interface RetryResult {
+  retried: number[];
+  skipped: { id: number; reason: string }[];
+}
+
+export function retryTasks(taskIds: number[]): Promise<RetryResult> {
+  return api<RetryResult>("/api/tasks/retry", { method: "POST", body: { task_ids: taskIds } });
 }
 
 export interface TimelineEntry {
