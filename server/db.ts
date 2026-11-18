@@ -50,11 +50,13 @@ export interface RunRow {
   ended_at: string | null;
 }
 
-// A Claude login. Each one lives in its own config folder; runs go to them in `position` order.
+// A Claude login. Each one lives in its own config folder. The mains take runs before the fallbacks;
+// `position` is the order they were added in.
 export interface AccountRow {
   id: number;
   name: string;
   config_dir: string;
+  role: "main" | "fallback";
   position: number;
   enabled: number;
   limited_until: string | null;
@@ -204,6 +206,11 @@ if (!runColumns.includes("history_removed_at")) {
 const accountColumns = (db.prepare("PRAGMA table_info(accounts)").all() as { name: string }[]).map((c) => c.name);
 if (!accountColumns.includes("plan_tier")) db.exec("ALTER TABLE accounts ADD COLUMN plan_tier TEXT");
 if (!accountColumns.includes("plan_size")) db.exec("ALTER TABLE accounts ADD COLUMN plan_size REAL");
+if (!accountColumns.includes("role")) {
+  // Before roles, Claude's usual folder was the one main account and every other was a fallback.
+  db.exec("ALTER TABLE accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'fallback'");
+  db.prepare("UPDATE accounts SET role = 'main' WHERE config_dir = ?").run(config.claudeConfigDir);
+}
 
 export const now = () => new Date().toISOString();
 

@@ -1,16 +1,17 @@
 // Which Claude account the next run goes to. Kept free of the database so it can be tested on its own.
 //
-// The main account is the primary. It takes every run until it reaches the switch-over point. After
-// that its remaining room is held in reserve, and runs are spread over the other accounts (the
-// fallbacks) by how much room each has and how soon that room would reset unused (see poolScore). The
-// primary's reserve is used only when no fallback has any room.
+// Each account is a main or a fallback. The mains share every run between them until each reaches the
+// switch-over point. After that a main's remaining room is held in reserve, and once every main is
+// past it (or can't take runs), runs are spread over the fallbacks. Within each group, runs go by how
+// much room each account has and how soon that room would reset unused (see poolScore). The mains'
+// reserve is used only when no fallback has any room.
 
 export interface AccountState {
   id: number;
   name: string;
   // The order accounts were added in. Only breaks ties between equal scores.
   position: number;
-  // The main account (Claude's usual folder), which is the primary.
+  // A main account: one that takes runs before the fallbacks do.
   is_main?: boolean;
   enabled: boolean;
   folder_exists: boolean;
@@ -79,7 +80,7 @@ function hoursLeft(resetsAt: string | null, nowMs: number, fresh: number): numbe
   return at > nowMs ? (at - nowMs) / HOUR_MS : fresh;
 }
 
-// How strongly an account in the pool should get the next run. Higher is better.
+// How strongly an account should get the next run, against the others in its group. Higher is better.
 //
 // - The 5-hour room it has left, per hour until that room resets: room that resets soon is lost if
 //   it isn't used, so 60% left with 30 minutes to go beats 80% left with 4½ hours. Anything under an
@@ -106,37 +107,41 @@ export function poolScore(a: AccountState, nowMs: number): number {
   return (Math.max(0, fiveRate) * (a.plan_size ?? 1) * Math.max(0, pace)) / (1 + (a.running ?? 0));
 }
 
-// The primary account: main, while it's turned on and logged in. When it isn't, there's no primary
-// and every run is shared between the fallbacks. While main waits out a limit it stays primary (and
-// is skipped), so its reserve isn't touched before the fallbacks are full.
-export function primaryAccount<T extends AccountState>(accounts: T[]): T | null {
-  return accounts.find((a) => a.is_main && usable(a)) ?? null;
-}
-
-// The fallbacks runs are spread over once the primary is past its switch-over point, best first.
-export function rankPool<T extends AccountState>(accounts: T[], nowMs = Date.now()): T[] {
-  const primary = primaryAccount(accounts);
+// Best first by poolScore; the order accounts were added in breaks ties.
+function byScore<T extends AccountState>(accounts: T[], nowMs: number): T[] {
   return accounts
-    .filter((a) => a !== primary && canRun(a, nowMs) && hasRoom(a, nowMs))
     .map((a) => ({ a, score: poolScore(a, nowMs) }))
     .sort((x, y) => y.score - x.score || x.a.position - y.a.position)
     .map((x) => x.a);
 }
 
-export function primaryUnderSwitchOver(a: AccountState, t: Thresholds, nowMs: number): boolean {
+export function underSwitchOver(a: AccountState, t: Thresholds, nowMs: number): boolean {
   return (
     currentPct(a.five_hour_pct, a.five_hour_resets_at, nowMs) < t.switch_at_5h_pct &&
     currentPct(a.seven_day_pct, a.seven_day_resets_at, nowMs) < t.switch_at_weekly_pct
   );
 }
 
+export type Group = "main" | "fallback" | "reserve";
+
+// The accounts new runs are shared between right now, best first, and which group they are:
+// - "main": the mains that can run and are under the switch-over point.
+// - "fallback": when no main is, the fallbacks with room. With no main turned on and logged in, this
+//   is every run.
+// - "reserve": when no fallback has room either, the mains' room past the switch-over point.
+// Empty when no account can take a run. A main waiting out a limit is skipped, but it stays a main, so
+// its reserve isn't touched before the fallbacks are full.
+export function sharing<T extends AccountState>(accounts: T[], t: Thresholds, nowMs = Date.now()): { group: Group; accounts: T[] } {
+  const ready = accounts.filter((a) => canRun(a, nowMs) && hasRoom(a, nowMs));
+  const mains = ready.filter((a) => a.is_main && underSwitchOver(a, t, nowMs));
+  if (mains.length) return { group: "main", accounts: byScore(mains, nowMs) };
+  const fallbacks = ready.filter((a) => !a.is_main);
+  if (fallbacks.length) return { group: "fallback", accounts: byScore(fallbacks, nowMs) };
+  return { group: "reserve", accounts: byScore(ready, nowMs) };
+}
+
 export function chooseAccount<T extends AccountState>(accounts: T[], t: Thresholds, nowMs = Date.now()): T | null {
-  const primary = primaryAccount(accounts);
-  const primaryReady = !!primary && canRun(primary, nowMs);
-  if (primary && primaryReady && primaryUnderSwitchOver(primary, t, nowMs)) return primary;
-  const best = rankPool(accounts, nowMs)[0];
-  if (best) return best;
-  return primary && primaryReady && hasRoom(primary, nowMs) ? primary : null;
+  return sharing(accounts, t, nowMs).accounts[0] ?? null;
 }
 
 // Plan size from the rate-limit tier Claude Code saves with the login, e.g. "default_claude_max_5x".

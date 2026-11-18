@@ -94,7 +94,7 @@ export function startRun(run: RunRow, account: { id: number; config_dir: string 
   };
   for (const key of SECRET_ENV) delete env[key];
   Object.assign(env, tools.env);
-  // Which login Claude uses. The main account runs exactly as before (without CLAUDE_CONFIG_DIR, Claude
+  // Which login Claude uses. Claude's usual folder runs exactly as before (without CLAUDE_CONFIG_DIR, Claude
   // also reads ~/.claude.json). Every account shares one projects folder, so sessions resume on any of them.
   if (account.config_dir !== config.claudeConfigDir) env.CLAUDE_CONFIG_DIR = account.config_dir;
 

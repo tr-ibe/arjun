@@ -314,6 +314,7 @@ tbody tr.selected { background: var(--accent-soft); }
 /* ---- Accounts ---- */
 .accounts { display: grid; gap: 12px; margin-bottom: 16px; }
 .accounts p { margin: 0; }
+.accounts select.role { width: auto; margin: 4px 0 2px; padding: 3px 8px; font-size: 13px; }
 .account-actions { display: inline-flex; gap: 6px; white-space: nowrap; }
 .usage { min-width: 120px; }
 .meter { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }

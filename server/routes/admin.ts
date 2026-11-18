@@ -6,6 +6,7 @@ import {
   resetAccount,
   setAccountEnabled,
   setAccountPlanSize,
+  setAccountRole,
 } from "../accounts.js";
 import { sendTestAlert } from "../alerts.js";
 import { checkLogin, clearSessionCookie, createApiKey, listApiKeys, revokeApiKey, setSessionCookie } from "../auth.js";
@@ -100,8 +101,8 @@ export async function metaRoutes(app: FastifyInstance) {
   });
 }
 
-// The Claude accounts runs go to: main is the primary, and the rest are fallbacks that share runs once
-// it's past its switch-over point. They're added with the add-account command in the container.
+// The Claude accounts runs go to: the mains share them, and the fallbacks share them once every main is
+// past its switch-over point. They're added with the add-account command in the container.
 export async function accountRoutes(app: FastifyInstance) {
   const id = (req: { params: unknown }) => Number((req.params as { id: string }).id);
 
@@ -114,11 +115,16 @@ export async function accountRoutes(app: FastifyInstance) {
     return accountViews();
   });
 
-  // Either field, or both. plan_size null goes back to the size the login's plan implies.
+  // Any of the fields. plan_size null goes back to the size the login's plan implies.
   app.patch("/api/accounts/:id", async (req) => {
-    const body = (req.body ?? {}) as { enabled?: unknown; plan_size?: unknown };
-    if (body.enabled === undefined && body.plan_size === undefined) throw new ValidationError("Nothing to change.");
+    const body = (req.body ?? {}) as { enabled?: unknown; plan_size?: unknown; role?: unknown };
+    if (body.enabled === undefined && body.plan_size === undefined && body.role === undefined) {
+      throw new ValidationError("Nothing to change.");
+    }
     if (body.enabled !== undefined && typeof body.enabled !== "boolean") throw new ValidationError("enabled must be true or false.");
+    if (body.role !== undefined && body.role !== "main" && body.role !== "fallback") {
+      throw new ValidationError('role must be "main" or "fallback".');
+    }
     if (
       body.plan_size !== undefined &&
       body.plan_size !== null &&
@@ -127,6 +133,7 @@ export async function accountRoutes(app: FastifyInstance) {
       throw new ValidationError("plan_size must be a number from 0 to 100, or null.");
     }
     if (typeof body.enabled === "boolean") setAccountEnabled(id(req), body.enabled);
+    if (body.role === "main" || body.role === "fallback") setAccountRole(id(req), body.role);
     if (body.plan_size !== undefined) setAccountPlanSize(id(req), body.plan_size as number | null);
     kick();
     return accountViews();

@@ -96,10 +96,11 @@ export function SettingsPage() {
 
         <h2>Sharing runs between accounts</h2>
         <p className="muted">
-          The main account is the primary. It takes every new run until it has used this much. Then its remaining room
-          is kept in reserve, and new runs are shared between the fallback accounts: more to an account whose room resets
-          sooner (so it isn't lost), to bigger plans, and to accounts with fewer runs going. An account using its week
-          faster than an even pace gets less. Main's reserve is used only when no fallback has room.
+          The main accounts share every new run until each has used this much. Then a main's remaining room is kept in
+          reserve, and once every main is past this point, new runs are shared between the fallback accounts. Runs are
+          shared the same way in both groups: more to an account whose room resets sooner (so it isn't lost), to bigger
+          plans, and to accounts with fewer runs going. An account using its week faster than an even pace gets less.
+          The mains' reserve is used only when no fallback has room.
         </p>
         <div className="row four">
           <Field label="5-hour usage (%)" htmlFor="switch_at_5h_pct">
@@ -300,10 +301,12 @@ function Accounts({ thresholds }: { thresholds: Settings }) {
         </button>
       </div>
       <p className="muted">
-        Main is the primary; every other account is a fallback. To add a fallback, open the container's terminal and run{" "}
-        <code>add-account &lt;name&gt;</code> (e.g. <code>add-account third</code>), then <code>/login</code> in the Claude
-        that opens. It appears here within a minute. Run the same command to log an account in again. To remove one, turn
-        it off, delete its folder (<code>rm -rf ~/accounts/&lt;name&gt;</code>) and press <strong>Remove</strong>.
+        Each account is a <strong>main</strong> or a <strong>fallback</strong>: the mains share every run, and the
+        fallbacks take over once every main is past its switch-over point. To add an account, open the container's terminal
+        and run <code>add-account &lt;name&gt;</code> (e.g. <code>add-account third</code>), then <code>/login</code> in
+        the Claude that opens. It appears here within a minute as a fallback; change it to Main in its row. Run the same
+        command to log an account in again. To remove one, turn it off, delete its folder (
+        <code>rm -rf ~/accounts/&lt;name&gt;</code>) and press <strong>Remove</strong>.
       </p>
       {error && <div className="form-error">{error}</div>}
       <div className="table-wrap">
@@ -324,7 +327,16 @@ function Accounts({ thresholds }: { thresholds: Settings }) {
               <tr key={a.id} className={a.enabled ? "" : "revoked"}>
                 <td>
                   <div className="task-title">{a.name}</div>
-                  <div className="sub">{a.is_main ? "Primary" : "Fallback"}</div>
+                  <select
+                    className="role"
+                    aria-label={`Role of ${a.name}`}
+                    disabled={busy}
+                    value={a.role}
+                    onChange={(e) => act(`/api/accounts/${a.id}`, "PATCH", { role: e.target.value })}
+                  >
+                    <option value="main">Main</option>
+                    <option value="fallback">Fallback</option>
+                  </select>
                   <div className="sub mono">{a.config_dir}</div>
                 </td>
                 <td>
@@ -375,7 +387,7 @@ function Accounts({ thresholds }: { thresholds: Settings }) {
                         Try again
                       </button>
                     )}
-                    {!a.folder_exists && !a.is_main ? (
+                    {!a.folder_exists && !a.is_default ? (
                       <button className="secondary" disabled={busy} onClick={() => act(`/api/accounts/${a.id}/forget`)}>
                         Remove
                       </button>
