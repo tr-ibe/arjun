@@ -17,9 +17,8 @@ import {
   parseUsage,
   planSizeFromTier,
   poolScore,
-  primaryAccount,
-  primaryUnderSwitchOver,
-  rankPool,
+  sharing,
+  underSwitchOver,
   type AccountState,
 } from "./routing.js";
 import { getSettings, ValidationError } from "./settings.js";
@@ -38,12 +37,15 @@ const BACKOFF_MAX_MS = 30 * 60_000;
 const RENEW_EVERY_MS = 30 * 60_000;
 const RENEW_TIMEOUT_MS = 2 * 60_000;
 
-export const isMain = (a: { config_dir: string }) => a.config_dir === config.claudeConfigDir;
+// Claude's usual folder, the account called "main" that's there from the start. It holds every
+// session, so it can't be removed, and runs on it go without CLAUDE_CONFIG_DIR. Whether it's a main or
+// a fallback is its role, like any other account's.
+export const isDefault = (a: { config_dir: string }) => a.config_dir === config.claudeConfigDir;
 
 export function listAccounts(): AccountRow[] {
-  // Main first, then the fallbacks in the order they were added.
+  // The mains first, then the fallbacks, each in the order they were added (Claude's usual folder first).
   return db
-    .prepare("SELECT * FROM accounts ORDER BY config_dir = ? DESC, position, id")
+    .prepare("SELECT * FROM accounts ORDER BY role = 'main' DESC, config_dir = ? DESC, position, id")
     .all(config.claudeConfigDir) as AccountRow[];
 }
 
@@ -59,15 +61,16 @@ function updateAccount(id: number, fields: Partial<AccountRow>): void {
 }
 
 const insertAccount = db.prepare(`
-  INSERT INTO accounts (name, config_dir, position, created_at)
-  VALUES (?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM accounts), ?)
+  INSERT INTO accounts (name, config_dir, role, position, created_at)
+  VALUES (?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM accounts), ?)
   ON CONFLICT DO NOTHING
 `);
 
-// The main account is Claude's usual folder. Extra ones are the folders in accountsDir, added at the
-// end of the order once they have a login (the add-account command makes them).
+// Claude's usual folder starts as the main account. Extra ones are the folders in accountsDir, added
+// as fallbacks once they have a login (the add-account command makes them); Settings can make any of
+// them a main.
 export function syncAccounts(): void {
-  insertAccount.run("main", config.claudeConfigDir, now());
+  insertAccount.run("main", config.claudeConfigDir, "main", now());
   if (!existsSync(config.accountsDir)) return;
   const known = new Set(listAccounts().map((a) => a.config_dir));
   for (const name of readdirSync(config.accountsDir).sort()) {
@@ -76,7 +79,7 @@ export function syncAccounts(): void {
       if (!statSync(dir).isDirectory()) continue;
       if (!known.has(dir) && !readLogin(dir)) continue;
       prepareAccountDir(dir, config.claudeConfigDir);
-      if (!known.has(dir)) insertAccount.run(name, dir, now());
+      if (!known.has(dir)) insertAccount.run(name, dir, "fallback", now());
     } catch {
       // A folder we can't read is skipped; the others still count.
     }
@@ -84,7 +87,8 @@ export function syncAccounts(): void {
 }
 
 // plan_size is the size in use; plan_size_set is the one set in Settings, if any.
-type Account = Omit<AccountRow, "enabled" | "plan_size"> & AccountState & { plan_size: number; plan_size_set: number | null };
+type Account = Omit<AccountRow, "enabled" | "plan_size"> &
+  AccountState & { is_default: boolean; plan_size: number; plan_size_set: number | null };
 
 // The plan size set in Settings, else the one the login's tier implies, else Pro's.
 const planSize = (a: AccountRow) => a.plan_size ?? planSizeFromTier(a.plan_tier) ?? 1;
@@ -96,14 +100,15 @@ function runningByAccount(): Map<number | null, number> {
   return new Map(rows.map((r) => [r.account_id, r.n]));
 }
 
-// Claude makes the main folder itself on first run; an extra account's folder holds its login.
+// Claude makes its usual folder itself on first run; an extra account's folder holds its login.
 function accountStates(): Account[] {
   const running = runningByAccount();
   return listAccounts().map((a) => ({
     ...a,
     enabled: !!a.enabled,
-    is_main: isMain(a),
-    folder_exists: isMain(a) || existsSync(a.config_dir),
+    is_main: a.role === "main",
+    is_default: isDefault(a),
+    folder_exists: isDefault(a) || existsSync(a.config_dir),
     plan_size: planSize(a),
     plan_size_set: a.plan_size,
     running: running.get(a.id) ?? 0,
@@ -134,7 +139,8 @@ export function markLoginFailed(id: number, message: string): void {
 }
 
 // Accounts that are turned on but can't be used until someone logs them in again, with how to fix
-// each. Main without a saved login isn't one: Claude may keep its login elsewhere (the macOS keychain).
+// each. Claude's usual folder without a saved login isn't one: Claude may keep its login elsewhere (the
+// macOS keychain).
 export function accountsNeedingRepair(): { id: number; name: string; problem: string; fix: string }[] {
   return accountStates()
     .filter((a) => a.enabled && (a.login_error || !a.folder_exists))
@@ -142,7 +148,7 @@ export function accountsNeedingRepair(): { id: number; name: string; problem: st
       id: a.id,
       name: a.name,
       problem: a.folder_exists ? a.login_error! : `Its folder ${a.config_dir} is missing.`,
-      fix: isMain(a) ? "claude" : `add-account ${a.name}`,
+      fix: isDefault(a) ? "claude" : `add-account ${a.name}`,
     }));
 }
 
@@ -176,7 +182,7 @@ async function checkUsage(a: AccountRow): Promise<void> {
   const loginOk = !a.login_error || fields.login_error === null;
 
   if (!login) {
-    if (isMain(a)) {
+    if (isDefault(a)) {
       fields.usage_error = "No saved login to read usage with.";
     } else if (!a.login_error || fields.login_error === null) {
       fields.login_error = `Not logged in. Run add-account ${a.name} in the container.`;
@@ -219,7 +225,7 @@ async function checkUsage(a: AccountRow): Promise<void> {
 // ---- Renewing an expired login ----
 //
 // Claude Code renews an expired login itself the next time it runs on the account. A fallback gets no
-// runs while main has room, so its login could sit expired for days, and whether it still works would
+// runs while a main has room, so its login could sit expired for days, and whether it still works would
 // only show when it's needed. So Arjun starts a tiny run on it instead (a one-word answer from Haiku,
 // no tools, nothing saved): Claude Code renews the login the way it always does, and a login that no
 // longer works shows up as Needs login, with a Slack alert, straight away. Claude Code also takes care
@@ -258,7 +264,7 @@ async function renewLogin(id: number): Promise<void> {
 function askClaude(configDir: string): Promise<{ code: number | null; output: string }> {
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const key of SECRET_ENV) delete env[key];
-  // As for runs, the main account runs without CLAUDE_CONFIG_DIR.
+  // As for runs, Claude's usual folder runs without CLAUDE_CONFIG_DIR.
   if (configDir !== config.claudeConfigDir) env.CLAUDE_CONFIG_DIR = configDir;
   const args = ["-p", "Reply with the single word OK.", "--model", "haiku", "--tools", "", "--strict-mcp-config", "--no-session-persistence"];
   return new Promise((resolve) => {
@@ -289,14 +295,10 @@ export async function checkAllAccounts({ force = false } = {}): Promise<void> {
       (r) => r.account_id,
     ),
   );
-  // The accounts the next runs could go to: the primary, or every account in the pool once the primary
-  // is past its switch-over point, since the pool is weighed on all their readings.
+  // The accounts the next runs could go to: every account in the group runs are being shared between,
+  // since they're weighed against each other on their readings.
   const candidates = new Set<number>();
-  if (busy) {
-    const next = pickAccount();
-    if (next) candidates.add(next.id);
-    if (next && next.id !== primaryAccount(accountStates())?.id) for (const a of rankPool(accountStates())) candidates.add(a.id);
-  }
+  if (busy) for (const a of sharing(accountStates(), getSettings()).accounts) candidates.add(a.id);
   const due = (a: AccountRow) => {
     if (backedOff(a.id)) return false;
     if (force) return true;
@@ -330,32 +332,31 @@ export function accountViews() {
   const s = getSettings();
   const states = accountStates();
   const nowMs = Date.now();
-  const next = chooseAccount(states, s, nowMs);
-  const primary = primaryAccount(states);
-  // While the pool is taking runs, each pool account's share of them, in proportion to its score.
-  const sharing = !!next && next.id !== primary?.id;
-  const pool = sharing ? rankPool(states, nowMs) : [];
-  const scores = new Map(pool.map((a) => [a.id, poolScore(a, nowMs)]));
+  const group = sharing(states, s, nowMs);
+  const next = group.accounts[0];
+  // While runs are shared between two or more accounts, each one's share, in proportion to its score.
+  const shared = group.accounts.length > 1 ? group.accounts : [];
+  const scores = new Map(shared.map((a) => [a.id, poolScore(a, nowMs)]));
   const total = [...scores.values()].reduce((sum, v) => sum + v, 0);
   return states.map((a) => {
     const fiveHour = currentPct(a.five_hour_pct, a.five_hour_resets_at, nowMs);
     const weekly = currentPct(a.seven_day_pct, a.seven_day_resets_at, nowMs);
-    const isPrimary = primary?.id === a.id;
     let state: string;
     if (!a.enabled) state = "Turned off";
     else if (!a.folder_exists) state = "Folder missing";
     else if (a.login_error) state = "Needs login";
     else if (a.limited_until && Date.parse(a.limited_until) > nowMs) state = "Limit reached";
     else if (fiveHour >= 100 || weekly >= 100) state = "Full";
-    else if (isPrimary && !primaryUnderSwitchOver(a, s, nowMs)) state = "In reserve";
+    else if (a.is_main && !underSwitchOver(a, s, nowMs)) state = "In reserve";
     else state = "Ready";
     return {
       id: a.id,
       name: a.name,
       config_dir: a.config_dir,
       enabled: a.enabled,
-      is_main: isMain(a),
-      is_primary: isPrimary,
+      role: a.role,
+      is_main: a.is_main,
+      is_default: a.is_default,
       folder_exists: a.folder_exists,
       state,
       next: next?.id === a.id,
@@ -390,6 +391,11 @@ export function setAccountEnabled(id: number, enabled: boolean): void {
   updateAccount(id, { enabled: enabled ? 1 : 0 });
 }
 
+export function setAccountRole(id: number, role: AccountRow["role"]): void {
+  mustGet(id);
+  updateAccount(id, { role });
+}
+
 // null goes back to the size the login's tier implies.
 export function setAccountPlanSize(id: number, size: number | null): void {
   mustGet(id);
@@ -405,7 +411,7 @@ export function resetAccount(id: number): void {
 // Only an account whose folder is gone can be forgotten; otherwise it would just be found again.
 export function forgetAccount(id: number): void {
   const a = mustGet(id);
-  if (isMain(a)) throw new ValidationError("The main account can't be removed. Turn it off instead.");
+  if (isDefault(a)) throw new ValidationError("Claude's usual account can't be removed. Turn it off instead.");
   if (existsSync(a.config_dir)) {
     throw new ValidationError(`Delete its folder first (rm -rf ${a.config_dir}), or turn it off instead.`);
   }

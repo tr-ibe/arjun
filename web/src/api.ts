@@ -107,8 +107,10 @@ export interface Account {
   name: string;
   config_dir: string;
   enabled: boolean;
+  role: "main" | "fallback";
   is_main: boolean;
-  is_primary: boolean;
+  // Claude's usual folder, which can't be removed.
+  is_default: boolean;
   folder_exists: boolean;
   state: string;
   next: boolean;

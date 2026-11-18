@@ -94,7 +94,7 @@ On the **API keys** page, create one key per caller (mytribe, trigger, agent0, �
 
 ## Claude accounts
 
-The main account is the primary; every account you add is a fallback. Main takes every run until it has used 85% of its 5-hour window (or 95% of its week). Then the rest of its room is kept in reserve, and runs are shared between the fallbacks: more to the ones whose room resets sooner, to bigger plans, and to ones with fewer runs going (the percentages are on the Settings page; see [Claude accounts](README.md#claude-accounts)). Arjun reads each account's plan from its login; if one is wrong, pick the right one in its **Plan** column. An account only provides usage: plugins, Slack and the mytribe CLI come from Arjun, so there's nothing else to set up per account.
+Each account is a main or a fallback. At the start `main` is the one main account, and every account you add is a fallback. The mains share every run until each has used 85% of its 5-hour window (or 95% of its week). Then the rest of a main's room is kept in reserve, and once every main is past that point, runs are shared between the fallbacks. In both groups runs go more to accounts whose room resets sooner, to bigger plans, and to ones with fewer runs going (the percentages are on the Settings page; see [Claude accounts](README.md#claude-accounts)). Arjun reads each account's plan from its login; if one is wrong, pick the right one in its **Plan** column. An account only provides usage: plugins, Slack and the mytribe CLI come from Arjun, so there's nothing else to set up per account.
 
 ### Adding an account
 
@@ -108,13 +108,17 @@ Use any name (letters, digits, `-` and `_`; `main` is taken). Claude opens with 
 
 The account appears in Settings → Claude accounts as a fallback within a minute, or straight away with **Check usage now**. A third, fourth or tenth account works the same way.
 
+### Making an account a main
+
+When one main account can't take the load, add another account as above and change it from **Fallback** to **Main** in its row on the Settings page. The mains then share the runs between them, and the fallbacks are used only once every main is past its switch-over point. Setting a main back to **Fallback** works the same way, and takes effect from the next run.
+
 ### Removing an account
 
 1. Settings → Claude accounts → **Turn off** on its row, and wait until its **Running** count is 0.
 2. In the container's terminal: `rm -rf ~/accounts/<name>`. This only deletes that account's login and settings; its `projects` entry is a link to the shared sessions, which stay.
 3. Press **Remove** on its row.
 
-Its past runs keep their history; they just no longer show which account they ran on. The main account can't be removed (its folder holds every session): turn it off instead, and every run goes to the fallbacks.
+Its past runs keep their history; they just no longer show which account they ran on. The `main` account (Claude's usual folder) can't be removed, since its folder holds every session: turn it off instead, and runs go to the other accounts.
 
 To stop using an account for a while without removing it, **Turn off** is enough. **Turn on** brings it back.
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chooseAccount, detectLoginFailure, nextFreeAt, parseUsage, hasFiveHourLimit, hasWeeklyLimit, planSizeFromTier, poolScore } from "../dist/server/routing.js";
+import { chooseAccount, detectLoginFailure, nextFreeAt, parseUsage, hasFiveHourLimit, hasWeeklyLimit, planSizeFromTier, poolScore, sharing } from "../dist/server/routing.js";
 
 const NOW = Date.parse("2026-10-27T10:00:00Z");
 const inHours = (h) => new Date(NOW + h * 3600_000).toISOString();
@@ -25,14 +25,14 @@ const account = (id, fields = {}) => ({
 });
 const pick = (accounts) => chooseAccount(accounts, T, NOW)?.id ?? null;
 
-test("main is the primary and takes every run while it's under the switch-over point", () => {
+test("a single main takes every run while it's under the switch-over point", () => {
   const low = { five_hour_pct: 40, five_hour_resets_at: LATER };
   assert.equal(pick([account(1, low), account(2), account(3)]), 1);
   // Wherever it is in the list or the order.
   assert.equal(pick([account(2, { position: 1 }), account(3, { position: 2 }), account(1, { position: 3, ...low })]), 1);
 });
 
-test("past the switch-over point, runs go to the pool account whose room would reset sooner", () => {
+test("past the switch-over point, runs go to the fallback whose room would reset sooner", () => {
   const past = { five_hour_pct: 90, five_hour_resets_at: LATER };
   // 60% left resetting in 30 minutes beats 80% left resetting in 4½ hours, whatever the order.
   const soon = { five_hour_pct: 40, five_hour_resets_at: inHours(0.5) };
@@ -91,12 +91,12 @@ test("an account with no weekly limit (Enterprise) gets the most a week can give
   assert.equal(poolScore(enterprise, NOW), poolScore(even, NOW) * 1.5);
 });
 
-test("a primary with no weekly limit shares runs out only on its 5-hour usage", () => {
+test("a main with no weekly limit hands runs to the fallbacks only on its 5-hour usage", () => {
   assert.equal(pick([account(1, { five_hour_pct: 80, five_hour_resets_at: LATER }), account(2)]), 1);
   assert.equal(pick([account(1, { five_hour_pct: 86, five_hour_resets_at: LATER }), account(2)]), 2);
 });
 
-test("the primary's room past the switch-over point is kept in reserve until the pool is full", () => {
+test("a main's room past the switch-over point is kept in reserve until the fallbacks are full", () => {
   const past = { five_hour_pct: 90, five_hour_resets_at: LATER };
   const nearlyFull = { five_hour_pct: 99, five_hour_resets_at: LATER };
   const full = { five_hour_pct: 100, five_hour_resets_at: LATER };
@@ -105,16 +105,61 @@ test("the primary's room past the switch-over point is kept in reserve until the
   assert.equal(pick([account(1, full), account(2, full)]), null);
 });
 
-test("a limited primary stays primary, so the pool shares the runs rather than filling in order", () => {
+test("a limited main stays a main, so the fallbacks share the runs rather than filling in order", () => {
   const best = { five_hour_pct: 10, five_hour_resets_at: inHours(1) };
   assert.equal(pick([account(1, { limited_until: LATER }), account(2), account(3, best)]), 3);
 });
 
-test("with main off or logged out there's no primary, and every run is shared between the fallbacks", () => {
+test("with no main turned on and logged in, every run is shared between the fallbacks", () => {
   const low = { five_hour_pct: 40, five_hour_resets_at: LATER };
   const best = { five_hour_pct: 10, five_hour_resets_at: inHours(1) };
   assert.equal(pick([account(1, { enabled: false }), account(2, low), account(3, best)]), 3);
   assert.equal(pick([account(1, { login_error: "x" }), account(2, low), account(3, best)]), 3);
+});
+
+test("several mains share the runs by room, and the fallbacks get none while any main is under the switch-over point", () => {
+  const main = (id, fields) => account(id, { is_main: true, ...fields });
+  // 3 has the most room per hour, 2 next; 4 is a fresh fallback and isn't in the share.
+  const accounts = [
+    main(1, { five_hour_pct: 70, five_hour_resets_at: LATER }),
+    main(2, { five_hour_pct: 40, five_hour_resets_at: LATER }),
+    main(3, { five_hour_pct: 10, five_hour_resets_at: LATER }),
+    account(4),
+  ];
+  const now = sharing(accounts, T, NOW);
+  assert.equal(now.group, "main");
+  assert.deepEqual(now.accounts.map((a) => a.id), [3, 2, 1]);
+  // A burst is spread over all three, in proportion to their room.
+  const got = { 1: 0, 2: 0, 3: 0 };
+  for (let i = 0; i < 12; i++) {
+    const id = pick(accounts);
+    got[id]++;
+    const a = accounts.find((x) => x.id === id);
+    a.running = (a.running ?? 0) + 1;
+  }
+  assert.deepEqual(got, { 1: 2, 2: 4, 3: 6 });
+});
+
+test("a main past the switch-over point drops out of the share, and the fallbacks start once every main has", () => {
+  const main = (id, fields) => account(id, { is_main: true, ...fields });
+  const past = { five_hour_pct: 90, five_hour_resets_at: LATER };
+  const low = { five_hour_pct: 60, five_hour_resets_at: LATER };
+  assert.equal(pick([main(1, past), main(2, low), account(3)]), 2);
+  // Nor does a main waiting out a limit, or one that's off.
+  assert.equal(pick([main(1, low), main(2, { limited_until: LATER }), account(3)]), 1);
+  assert.equal(pick([main(1, { enabled: false }), main(2, low), account(3)]), 2);
+  const fallbacks = sharing([main(1, past), main(2, { five_hour_pct: 86, five_hour_resets_at: LATER }), account(3), account(4)], T, NOW);
+  assert.equal(fallbacks.group, "fallback");
+  assert.deepEqual(fallbacks.accounts.map((a) => a.id), [3, 4]);
+});
+
+test("with every fallback full, the mains' reserves are shared by room", () => {
+  const main = (id, fields) => account(id, { is_main: true, ...fields });
+  const full = { five_hour_pct: 100, five_hour_resets_at: LATER };
+  const reserve = sharing([main(1, { five_hour_pct: 95, five_hour_resets_at: LATER }), main(2, { five_hour_pct: 88, five_hour_resets_at: LATER }), account(3, full)], T, NOW);
+  assert.equal(reserve.group, "reserve");
+  assert.deepEqual(reserve.accounts.map((a) => a.id), [2, 1]);
+  assert.deepEqual(sharing([main(1, full), main(2, full), account(3, full)], T, NOW).accounts, []);
 });
 
 test("the weekly window counts too", () => {

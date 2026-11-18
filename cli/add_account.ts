@@ -2,7 +2,7 @@
 // Adds a Claude account for Arjun to use, or logs an existing one in again:
 //   add-account <name>
 // Sets up the account's own Claude folder, then opens Claude in it so you can run /login.
-// The server finds the folder within a minute and adds it at the end of the order.
+// The server finds the folder within a minute and adds it as a fallback; Settings can make it a main.
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -46,8 +46,8 @@ if (res.error) {
 
 if (readLogin(dir)) {
   console.log(`
-Account "${name}" is logged in. Arjun picks it up within a minute, after the accounts already there.
-Change the order, or turn it off, on the Settings page.`);
+Account "${name}" is logged in. Arjun picks it up within a minute, as a fallback.
+To have it share runs with the main account, set it to Main on the Settings page.`);
 } else {
   console.log(`
 No login was saved for "${name}". Run add-account ${name} again and use /login.`);

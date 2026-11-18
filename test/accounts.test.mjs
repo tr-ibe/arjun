@@ -148,8 +148,12 @@ test("finds the main account and the logged-in folders, in that order, and reads
   );
   assert.equal(accounts[0].five_hour_pct, 10);
   assert.equal(accounts[0].next, true);
-  assert.equal(accounts[0].is_primary, true);
-  // The plan comes from the login; no runs are being shared out while the primary has room.
+  // Claude's usual folder starts as the one main; added accounts are fallbacks.
+  assert.deepEqual(
+    accounts.map((a) => [a.role, a.is_default]),
+    [["main", true], ["fallback", false], ["fallback", false]],
+  );
+  // The plan comes from the login; no runs are being shared out while the one main has room.
   assert.ok(accounts.every((a) => a.plan_size === 5 && a.plan_size_set === null && a.share_pct === null));
   assert.ok(accounts.every((a) => a.state === "Ready"));
   // Extra accounts share the main account's sessions.
@@ -166,12 +170,12 @@ test("API keys can't see accounts", async () => {
   assert.equal(res.status, 403);
 });
 
-test("runs on the primary while it's under the switch-over point", async () => {
+test("runs on the main account while it's under the switch-over point", async () => {
   const task = await runTask("hello");
   assert.equal(task.latest_run.account_name, "main");
 });
 
-test("past the switch-over point, the primary is kept in reserve and runs are shared by room and reset time", async () => {
+test("past the switch-over point, the main is kept in reserve and runs are shared by room and reset time", async () => {
   setUsage("main", 90);
   // The same room left, but third's resets sooner, so it's used first though it's later in the order.
   setUsage("second", 30, 4);
@@ -210,10 +214,44 @@ test("an account whose usage has no weekly window has no weekly limit", async ()
   assert.equal(byName(accounts, "second").weekly_limit, true);
 });
 
-test("accounts can't be reordered: main is always the primary", async () => {
+test("accounts can't be reordered", async () => {
   const accounts = await check();
   assert.equal((await call("POST", `/api/accounts/${byName(accounts, "third").id}/move`, { direction: "up" })).status, 404);
-  assert.equal(byName(accounts, "main").is_primary, true);
+});
+
+test("several accounts can be mains, sharing the runs until each is past the switch-over point", async () => {
+  let accounts = await check();
+  const second = byName(accounts, "second");
+  assert.equal((await call("PATCH", `/api/accounts/${second.id}`, { role: "primary" })).status, 400);
+  accounts = (await call("PATCH", `/api/accounts/${second.id}`, { role: "main" })).data;
+  // The mains are listed first.
+  assert.deepEqual(accounts.map((a) => [a.name, a.role]), [["main", "main"], ["second", "main"], ["third", "fallback"]]);
+
+  // Both under the switch-over point: they share the runs, more to second, whose room resets sooner.
+  setUsage("main", 10, 3);
+  setUsage("second", 10, 1);
+  accounts = await check();
+  assert.ok(byName(accounts, "second").next);
+  assert.ok(byName(accounts, "second").share_pct > byName(accounts, "main").share_pct);
+  assert.equal(byName(accounts, "main").share_pct + byName(accounts, "second").share_pct, 100);
+  assert.equal(byName(accounts, "third").share_pct, null);
+  assert.equal((await runTask("hello")).latest_run.account_name, "second");
+
+  // second past it: main takes the runs, and second's room is kept in reserve.
+  setUsage("second", 90, 1);
+  accounts = await check();
+  assert.equal(byName(accounts, "second").state, "In reserve");
+  assert.equal((await runTask("hello")).latest_run.account_name, "main");
+
+  // Both past it: the fallback takes over.
+  setUsage("main", 90);
+  await check();
+  assert.equal((await runTask("hello")).latest_run.account_name, "third");
+
+  await call("PATCH", `/api/accounts/${second.id}`, { role: "fallback" });
+  setUsage("second", 30, 4);
+  accounts = await check();
+  assert.deepEqual(accounts.map((a) => a.role), ["main", "fallback", "fallback"]);
 });
 
 test("a run that hits the limit continues the same session on another account", async () => {

@@ -11,8 +11,8 @@ export interface Settings {
   default_effort: string;
   default_priority: number;
   default_timeout_min: number;
-  // The primary Claude account takes every run until it has used this much (percent); then runs are
-  // spread over the other accounts.
+  // The main Claude accounts share every run until each has used this much (percent); then runs are
+  // spread over the fallback accounts.
   switch_at_5h_pct: number;
   switch_at_weekly_pct: number;
   // Slack alerts, posted as Arjun. No channel means no alerts.

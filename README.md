@@ -46,36 +46,38 @@ The Claude accounts only provide usage. Everything else a run needs comes from A
 
 ## Claude accounts
 
-Arjun can use several Claude logins. The **main** account is the primary, and every other account is a **fallback**. Main takes every run until it has used 85% of its 5-hour window (or 95% of its week). After that, its remaining room is kept in reserve, and new runs are shared between the fallbacks. Main's reserve is used only when no fallback has room. Only when no account has room do runs wait, until the earliest reset. When main's window resets, it takes every run again. If main is turned off or needs a login, every run is shared between the fallbacks. You can change both percentages on the Settings page.
+Arjun can use several Claude logins. Each one is a **main** or a **fallback** account, set in its row on the Settings page. At the start, `main` (Claude's usual folder) is the one main account, and every account you add is a fallback.
 
-Each run goes to the fallback with the highest score, where the score is:
+The mains share every run between them until each has used 85% of its 5-hour window (or 95% of its week). A main past that point drops out of the share and its remaining room is kept in reserve; the other mains carry on. Once every main is past it (or turned off, limited or needing a login), new runs are shared between the fallbacks. The mains' reserve is used only when no fallback has room, and only when no account has room do runs wait, until the earliest reset. When a main's window resets, it rejoins the share. If no main is turned on and logged in, every run is shared between the fallbacks. You can change both percentages on the Settings page.
+
+Within each group (the mains, then the fallbacks, then the mains' reserve), each run goes to the account with the highest score, where the score is:
 
 - **The 5-hour room it has left, per hour until that window resets.** Room that resets soon is lost if it isn't used, so 60% left resetting in 30 minutes beats 80% left resetting in 4½ hours. Anything under an hour counts as an hour, so an account with a sliver left just before its reset doesn't beat a fresh one.
 - **Times its plan size**, so an Ultra account takes about twice as much as a Max one. Usage is a percentage, so without this a bigger account would be under-used. The size is the plan's weekly usage as a multiple of Pro's, read from the rate-limit tier saved with the login (Pro 1, Max 5, Ultra 10). Team and Enterprise premium seats have the Max tier, and standard seats count as Pro. The **Plan** column in Settings overrides it.
 - **Ultra (Max 20x until 30 Oct 2026) has no 5-hour limit once Anthropic has verified the account**, and its usage reply has only the weekly window. Settings shows **No 5-hour limit** for it, and its 5-hour room counts as a fresh window, so only its week holds it back. Its "20x" was only ever the 5-hour window: its week is 10× Pro's, so it counts as 10, not 20. A newer Ultra account keeps a 5-hour limit until it's verified, and is read like any other account until then. Older logins still carry the `max_20x` tier, which counts as Ultra.
-- **Times how its week is going against an even pace.** An account using its week faster than an even pace gets less, so it doesn't run out days before its weekly reset. One with plenty left near its weekly reset gets a little more (at most 1.5×). An account with no weekly limit (Enterprise, whose usage reply has only the 5-hour window) always gets the 1.5×, since none of its room is worth saving for later in the week. Settings shows **No weekly limit** for it, and as main it hands runs to the fallbacks on its 5-hour usage alone.
+- **Times how its week is going against an even pace.** An account using its week faster than an even pace gets less, so it doesn't run out days before its weekly reset. One with plenty left near its weekly reset gets a little more (at most 1.5×). An account with no weekly limit (Enterprise, whose usage reply has only the 5-hour window) always gets the 1.5×, since none of its room is worth saving for later in the week. Settings shows **No weekly limit** for it, and as a main it leaves the share on its 5-hour usage alone.
 - **Divided by one more than the runs already going on it.** Usage readings lag the runs, so without this a burst of new runs would all land on whichever account looked best a minute ago. Instead each account gets a share of the runs in proportion to its score. Settings shows each account's share while runs are being shared out.
 
 How it works:
 
-- **Before each run** the dispatcher picks the account. It uses the usage Claude reports for each account (the endpoint behind Claude Code's `/usage`). That endpoint rate-limits, so the server reads it only as often as routing needs: every 3 minutes for the accounts new runs could go to (main, or every fallback once main is past its switch-over point) and accounts with runs on them, every 15 minutes for the rest, and again when a run ends if the last reading is over a minute old. If it answers "rate limited", that account is left alone for 5 minutes, then 10, 20 and at most 30, and its last reading is used meanwhile.
+- **Before each run** the dispatcher picks the account. It uses the usage Claude reports for each account (the endpoint behind Claude Code's `/usage`). That endpoint rate-limits, so the server reads it only as often as routing needs: every 3 minutes for the accounts new runs could go to (the mains under their switch-over point, or the fallbacks once every main is past it) and accounts with runs on them, every 15 minutes for the rest, and again when a run ends if the last reading is over a minute old. If it answers "rate limited", that account is left alone for 5 minutes, then 10, 20 and at most 30, and its last reading is used meanwhile.
 - **If a run hits the limit anyway** (several runs started on an account that was just under the line), that account is skipped until its reset. The task continues straight away on another account, in the same Claude session and folder. A run whose login stopped working is handled the same way, and its account shows **Needs login** until someone logs it in again.
-- **An expired login is renewed straight away.** Claude Code renews an account's login itself whenever it runs on it, but a fallback gets no runs while main has room, so its login could sit expired for days, and whether it still works would only show when it was needed. So when a usage check finds the saved login expired (or the usage endpoint refuses it), Arjun starts a tiny run on that account: `claude -p` asking Haiku for one word, with no tools, MCP servers or saved session. Claude Code renews the login the way it always does, and the usage is read again. If the login no longer works, the account shows **Needs login** and an alert goes to Slack. Each account is tried at most every 30 minutes. Arjun never renews a login itself.
+- **An expired login is renewed straight away.** Claude Code renews an account's login itself whenever it runs on it, but a fallback gets no runs while a main has room, so its login could sit expired for days, and whether it still works would only show when it was needed. So when a usage check finds the saved login expired (or the usage endpoint refuses it), Arjun starts a tiny run on that account: `claude -p` asking Haiku for one word, with no tools, MCP servers or saved session. Claude Code renews the login the way it always does, and the usage is read again. If the login no longer works, the account shows **Needs login** and an alert goes to Slack. Each account is tried at most every 30 minutes. Arjun never renews a login itself.
 - **The usage endpoint isn't documented.** If it can't be read, the account counts as having room, and Arjun moves on when Claude says the limit was reached.
-- **Settings → Claude accounts** shows each account's usage, which one the next run goes to, each fallback's share of new runs, its plan, and buttons to turn accounts off or remove them. Each attempt on a task shows which account it ran on.
+- **Settings → Claude accounts** shows each account's usage, whether it's a main or a fallback, which one the next run goes to, each account's share of new runs while two or more share them, its plan, and buttons to turn accounts off or remove them. Each attempt on a task shows which account it ran on.
 
 ### Where the accounts live
 
 | Account | Folder | How it's logged in |
 |---|---|---|
-| main (always first at the start) | `/home/node/.claude` | `claude`, then `/login` |
+| main (a main account at the start) | `/home/node/.claude` | `claude`, then `/login` |
 | every extra account | `/home/node/accounts/<name>` | `add-account <name>` |
 
 Each extra folder links `projects` (every session) and your instructions, agents and commands to the main folder. That way any account can resume any session. Its login, `.claude.json` (MCP servers), `settings.json`, and the plugins and skills claude.ai syncs to it belong to that account. Plugins every run should have come from Arjun instead (see [What runs get from Arjun](#what-runs-get-from-arjun)).
 
 ### Adding, removing and swapping accounts
 
-In the container's terminal, `add-account <name>`, then `/login` and `/exit`. The account joins as a fallback. [SETUP.md → Claude accounts](SETUP.md#claude-accounts) has the steps for adding, removing, logging in again and putting a different subscription behind an account.
+In the container's terminal, `add-account <name>`, then `/login` and `/exit`. The account joins as a fallback; set it to **Main** in its row on the Settings page to have it share runs with the other mains. [SETUP.md → Claude accounts](SETUP.md#claude-accounts) has the steps for adding, removing, logging in again and putting a different subscription behind an account.
 
 ## Deploy on Coolify
 
@@ -104,7 +106,7 @@ If you can't wait, deploy anyway. Any run that was still going ends as "Interrup
 | `PLUGINS` | no | Plugins every run gets, as `<git url>#<folder>`, comma-separated. Default: `https://github.com/tr-ibe/mytribe.git#packages/shared/plugin`. Empty for none. |
 | `PORT` | no | Default 3000 |
 
-Everything else (max concurrency, when the primary account shares runs out, default model, effort, priority, timeout, Slack alerts) is on the Settings page. Claude accounts are added in the container, not with variables.
+Everything else (max concurrency, when the main accounts hand runs to the fallbacks, default model, effort, priority, timeout, Slack alerts) is on the Settings page. Claude accounts are added in the container, not with variables.
 
 ## Slack
 
