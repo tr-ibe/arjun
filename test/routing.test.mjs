@@ -265,5 +265,23 @@ test("recognises a login that stopped working", () => {
   assert.ok(detectLoginFailure("Invalid API key · Please run /login"));
   assert.ok(detectLoginFailure('API Error: 401 {"type":"error","error":{"type":"authentication_error"}}'));
   assert.ok(detectLoginFailure("OAuth token has expired. Please obtain a new token or refresh your existing token."));
+  // A sign-in that reached its time limit (what took an account out on 24 Nov 2026), and the other ways
+  // Claude Code says a login needs doing again.
+  assert.ok(
+    detectLoginFailure(
+      "Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs",
+    ),
+  );
+  assert.ok(detectLoginFailure("Failed to authenticate: this login reached its time limit · Sign in again to continue"));
+  assert.ok(detectLoginFailure("Login reached its time limit · Please run /login"));
+  assert.ok(detectLoginFailure("Login expired · Run /login to sign in again, or re-authenticate your Anthropic profile"));
+  assert.ok(detectLoginFailure("OAuth refresh token is no longer valid; run /login to re-authenticate"));
+  assert.ok(detectLoginFailure("Your organization has disabled API key authentication · Run /login to sign in with your claude.ai account"));
   assert.ok(!detectLoginFailure("All done. Opened PR #12."));
+  // Passes by itself, so the account stays in use.
+  assert.ok(
+    !detectLoginFailure(
+      "Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh) · Try again in a minute; if it keeps happening, close other Claude Code windows or sign in again with /login",
+    ),
+  );
 });

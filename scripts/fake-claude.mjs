@@ -27,6 +27,10 @@ const directive = (name, fallback, text = prompt) => {
   return all.length ? all[all.length - 1][1] : fallback;
 };
 
+// What Claude Code prints (on stdout, in -p mode) when an account's sign-in has ended.
+const LOGIN_ENDED =
+  "Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs";
+
 function fail(message, code) {
   console.error(message);
   process.exit(code);
@@ -36,7 +40,7 @@ if (args.includes("--no-session-persistence")) {
   const dir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
   appendFileSync(join(dir, "renewals.log"), `${JSON.stringify(args)}\n`);
   if (process.env.AUTH_PASSWORD || process.env.SLACK_USER_TOKEN) fail("fake-claude: secrets leaked into the environment", 4);
-  if (existsSync(join(dir, "fake-login-dead"))) fail("OAuth token has been revoked. Please run /login", 1);
+  if (existsSync(join(dir, "fake-login-dead"))) fail(LOGIN_ENDED, 1);
   const file = join(dir, ".credentials.json");
   const creds = JSON.parse(readFileSync(file, "utf8"));
   creds.claudeAiOauth.expiresAt = Date.now() + 8 * 3600_000;
@@ -109,7 +113,7 @@ switch (outcome) {
     console.log("You've hit your limit · resets 3pm (UTC)");
     process.exit(1);
   case "login":
-    console.log("Invalid API key · Please run /login");
+    console.log(LOGIN_ENDED);
     process.exit(1);
   default:
     fail(`fake-claude: unknown FAKE_OUTCOME ${outcome}`, 7);

@@ -221,7 +221,7 @@ test("an account whose login can't be renewed alerts once with the fix, and agai
   const before = posted.length;
   await call("POST", "/api/accounts/check", {});
   const alert = await waitFor(() => postedSince(before).find((t) => t.includes("*spare* needs repair")), "alerted");
-  assert.match(alert, /> OAuth token has been revoked/);
+  assert.match(alert, /> Failed to authenticate: this login reached its time limit/);
   assert.match(alert, /run `add-account spare`, then `\/login`/);
   assert.match(alert, /<https:\/\/arjun.example.com\/settings\|Open the console>/);
   await sleep(600);

@@ -223,8 +223,25 @@ function readWindow(w: unknown): { pct: number | null; resetsAt: string | null }
   return { pct: pct ?? null, resetsAt };
 }
 
-// Claude Code's messages when an account's login no longer works.
-const LOGIN_RE = /please run \/login|invalid api key|oauth token (has expired|has been revoked|revoked)|authentication_error/i;
+// Claude Code's messages when an account's login no longer works and only a new login fixes it, e.g.
+// "Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth
+// login` to sign in again…" (a sign-in now ends after a set time, however often it's renewed). Not the
+// ones that pass by themselves, like "another Claude Code process is refreshing it … try again in a
+// minute; … sign in again with /login", or an account would be taken out of use while it still works.
+const LOGIN_RE = new RegExp(
+  [
+    "please run /login",
+    "run /login to (sign in|re-authenticate)",
+    "run `?claude auth login`? to sign in",
+    "failed to authenticate",
+    "login reached its time limit",
+    "refresh token is no longer valid",
+    "invalid api key",
+    "oauth token (has expired|has been revoked|revoked)",
+    "authentication_error",
+  ].join("|"),
+  "i",
+);
 
 export function detectLoginFailure(output: string): boolean {
   return LOGIN_RE.test(output);
