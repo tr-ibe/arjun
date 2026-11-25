@@ -35,7 +35,9 @@ export interface Thresholds {
 
 const HOUR_MS = 3600_000;
 const WEEK_HOURS = 7 * 24;
-const MAX_PACE = 1.5;
+// The weekly pace of an account with no weekly limit: as if a whole week had to be used in one 5-hour
+// window. A constant, so accounts like it still share runs in proportion to their 5-hour room.
+const NO_WEEKLY_LIMIT_PACE = WEEK_HOURS / 5;
 
 // A reading only counts until its window resets.
 export function currentPct(pct: number | null, resetsAt: string | null, nowMs: number): number {
@@ -89,20 +91,22 @@ function hoursLeft(resetsAt: string | null, nowMs: number, fresh: number): numbe
 // - Times the plan size, so an Ultra account takes about twice what a Max one does: its week is 10×
 //   Pro's against Max's 5×.
 // - Times how its week is going against an even pace: an account using its week faster than that is
-//   slowed down so it doesn't run out days before the weekly reset, and one with plenty left near its
-//   reset gets a little more (at most 1.5×). An account with no weekly limit gets the most: none of
-//   its room is worth saving for later in the week.
+//   slowed down so it doesn't run out days before the weekly reset, and one with room left near its
+//   reset gets as much more as it needs to use that room up, with no cap: 32% of a week left 2 hours
+//   before the reset is 27× an even pace, and every run it doesn't take there is room lost. An account
+//   with no weekly limit gets 33.6× (NO_WEEKLY_LIMIT_PACE): none of its room is worth saving for
+//   later in the week.
 // - Divided by one more than the runs already on it. Readings lag the runs, so without this a burst
 //   of runs would all land on whichever account looked best a minute ago. Picking the highest score
 //   each time gives each account a share of the runs in proportion to its score.
 export function poolScore(a: AccountState, nowMs: number): number {
   const fiveLeft = 100 - currentPct(a.five_hour_pct, a.five_hour_resets_at, nowMs);
   const fiveRate = fiveLeft / Math.max(1, hoursLeft(a.five_hour_resets_at, nowMs, 5));
-  let pace = MAX_PACE;
+  let pace = NO_WEEKLY_LIMIT_PACE;
   if (hasWeeklyLimit(a)) {
     const weekLeft = 100 - currentPct(a.seven_day_pct, a.seven_day_resets_at, nowMs);
     const weekRate = weekLeft / Math.max(1, hoursLeft(a.seven_day_resets_at, nowMs, WEEK_HOURS));
-    pace = Math.min(MAX_PACE, weekRate / (100 / WEEK_HOURS));
+    pace = weekRate / (100 / WEEK_HOURS);
   }
   return (Math.max(0, fiveRate) * (a.plan_size ?? 1) * Math.max(0, pace)) / (1 + (a.running ?? 0));
 }

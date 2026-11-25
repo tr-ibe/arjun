@@ -99,7 +99,7 @@ export function SettingsPage() {
           The main accounts share every new run until each has used this much. Then a main's remaining room is kept in
           reserve, and once every main is past this point, new runs are shared between the fallback accounts. Runs are
           shared the same way in both groups: more to an account whose room resets sooner (so it isn't lost), to bigger
-          plans, and to accounts with fewer runs going. An account using its week faster than an even pace gets less.
+          plans, and to accounts with fewer runs going. An account using its week faster than an even pace gets less, and one with room left just before its weekly reset gets nearly every run until its 5-hour window is full.
           The mains' reserve is used only when no fallback has room.
         </p>
         <div className="row four">
