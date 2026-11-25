@@ -42,9 +42,11 @@ test("past the switch-over point, runs go to the fallback whose room would reset
 });
 
 test("a sliver left just before a reset doesn't beat a fresh account", () => {
+  // Accounts with a weekly limit: one without counts its room as free, and does take the run.
   const past = { five_hour_pct: 90, five_hour_resets_at: LATER };
-  const sliver = { five_hour_pct: 95, five_hour_resets_at: inHours(0.1) };
-  assert.equal(pick([account(1, past), account(2, sliver), account(3)]), 3);
+  const week = { seven_day_pct: 50, seven_day_resets_at: inHours(84) };
+  const sliver = { five_hour_pct: 95, five_hour_resets_at: inHours(0.1), ...week };
+  assert.equal(pick([account(1, past), account(2, sliver), account(3, week)]), 3);
 });
 
 test("a bigger plan takes a bigger share", () => {
@@ -78,7 +80,7 @@ test("an account using its week faster than an even pace is slowed down", () => 
   assert.ok(poolScore(account(2, fast), NOW) < poolScore(account(3, even), NOW) / 5);
 });
 
-test("an account with no weekly limit (Enterprise) gets the most a week can give, and isn't slowed", () => {
+test("an account with no weekly limit (Enterprise) counts as a whole week to use in one 5-hour window", () => {
   const past = { five_hour_pct: 90, five_hour_resets_at: LATER };
   const fiveHour = { five_hour_pct: 30, five_hour_resets_at: LATER };
   const enterprise = account(2, fiveHour);
@@ -88,7 +90,26 @@ test("an account with no weekly limit (Enterprise) gets the most a week can give
   // No reading at all isn't the same as no weekly limit.
   assert.equal(hasWeeklyLimit(account(4)), true);
   assert.equal(pick([account(1, past), even, enterprise]), 2);
-  assert.equal(poolScore(enterprise, NOW), poolScore(even, NOW) * 1.5);
+  // 168 hours squeezed into 5, against an account right on an even pace.
+  assert.ok(Math.abs(poolScore(enterprise, NOW) / poolScore(even, NOW) - 168 / 5) < 1e-9);
+});
+
+test("an account with room left just before its weekly reset takes nearly every run, with no cap", () => {
+  // Arjun's fallbacks on 25 Nov at 10:10 PM: kushank had 32% of its week left with 2⅓ hours to its reset,
+  // and got only 28% of new runs while the pace was capped at 1.5×.
+  const fallbacks = [
+    account(2, { five_hour_pct: 12, five_hour_resets_at: inHours(3.32), seven_day_pct: 41, seven_day_resets_at: inHours(79.32) }),
+    account(3, { five_hour_pct: 34, five_hour_resets_at: inHours(1.48), seven_day_pct: 74, seven_day_resets_at: inHours(35.32), running: 1 }),
+    account(4, { five_hour_pct: 4, five_hour_resets_at: inHours(4.32), seven_day_pct: 79, seven_day_resets_at: inHours(21.32) }),
+    account(5, { five_hour_pct: 16, five_hour_resets_at: inHours(2.65), seven_day_pct: 68, seven_day_resets_at: inHours(2.32) }),
+    account(6, { five_hour_pct: 5, five_hour_resets_at: inHours(2.98), seven_day_pct: 6, seven_day_resets_at: inHours(162.32) }),
+  ];
+  const scores = fallbacks.map((a) => poolScore(a, NOW));
+  const total = scores.reduce((x, y) => x + y, 0);
+  assert.equal(pick([account(1, { five_hour_pct: 100, five_hour_resets_at: LATER }), ...fallbacks]), 5);
+  assert.ok(scores[3] / total > 0.8);
+  // Its 5-hour window still holds it back: once that's full it takes nothing.
+  assert.equal(poolScore({ ...fallbacks[3], five_hour_pct: 100 }, NOW), 0);
 });
 
 test("a main with no weekly limit hands runs to the fallbacks only on its 5-hour usage", () => {
